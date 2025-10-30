@@ -6,7 +6,7 @@ local file_items = require("neo-tree.sources.common.file-items")
 local utils = require("neo-tree.utils")
 
 local M = {
-  name = "neotree-favorites",
+  name = "flat_favorites",
   display_name = "📦 Flat Favorites",
 }
 

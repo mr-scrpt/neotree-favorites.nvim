@@ -99,4 +99,16 @@ function M.toggle_flat_favorite(state)
   end
 end
 
+--- Clear all favorites for current project
+---@param state table
+function M.clear_all_flat_favorites(state)
+  manager.clear_all_favorites()
+  
+  -- Refresh the view if in flat_favorites source
+  if state.name == "flat_favorites" then
+    local mgr = require("neo-tree.sources.manager")
+    mgr.refresh("flat_favorites")
+  end
+end
+
 return M

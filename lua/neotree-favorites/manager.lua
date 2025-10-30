@@ -231,4 +231,29 @@ function M.get_project_info()
   }
 end
 
+--- Clear all favorites for current project
+function M.clear_all_favorites()
+  local data_path = get_data_path()
+  local favorites = M.load_favorites()
+  local count = vim.tbl_count(favorites)
+  
+  if count == 0 then
+    vim.notify("No favorites to clear", vim.log.levels.INFO)
+    return
+  end
+  
+  -- Confirm before clearing
+  local confirm = vim.fn.confirm(
+    string.format("Clear all %d favorites for this project?", count),
+    "&Yes\n&No",
+    2
+  )
+  
+  if confirm == 1 then
+    M.save_favorites({})
+    M.clear_cache()
+    vim.notify(string.format("Cleared %d favorites", count), vim.log.levels.INFO)
+  end
+end
+
 return M

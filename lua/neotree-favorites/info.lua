@@ -1,9 +1,9 @@
--- Command to show information about current project's favorites
+-- Команда для показа информации о favorites текущего проекта
 local manager = require("neotree-favorites.manager")
 
 local M = {}
 
---- Show information about current project's favorites
+--- Показать информацию о favorites текущего проекта
 function M.show_project_info()
   local info = manager.get_project_info()
   

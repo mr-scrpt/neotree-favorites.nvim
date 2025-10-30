@@ -50,6 +50,7 @@ A smart favorites system for [neo-tree.nvim](https://github.com/nvim-neo-tree/ne
         mappings = {
           ["s"] = "toggle_flat_favorite",
           ["I"] = "show_favorites_info",
+          ["w"] = "clear_all_flat_favorites",
         },
       },
       renderers = {
@@ -77,6 +78,7 @@ A smart favorites system for [neo-tree.nvim](https://github.com/nvim-neo-tree/ne
         mappings = {
           ["s"] = "toggle_flat_favorite",
           ["I"] = "show_favorites_info",
+          ["w"] = "clear_all_flat_favorites",
         },
       },
     },
@@ -84,6 +86,7 @@ A smart favorites system for [neo-tree.nvim](https://github.com/nvim-neo-tree/ne
     commands = {
       toggle_flat_favorite = require("neotree-favorites.commands").toggle_flat_favorite,
       show_favorites_info = require("neotree-favorites.info").show_project_info,
+      clear_all_flat_favorites = require("neotree-favorites.commands").clear_all_flat_favorites,
     },
   },
   keys = {
@@ -112,6 +115,9 @@ A smart favorites system for [neo-tree.nvim](https://github.com/nvim-neo-tree/ne
 
 **Toggle (add/remove):**
 - `s` - Toggle favorite (works everywhere)
+
+**Clear all:**
+- `w` - Clear all favorites for current project (with confirmation)
 
 **Info:**
 - `I` (Shift+i) - Show project info (inside Neo-tree)

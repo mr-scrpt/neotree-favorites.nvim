@@ -1,5 +1,5 @@
--- Flat Favorites source for neo-tree
--- Each added item is displayed as a separate root at the top level
+-- Flat Favorites source для neo-tree
+-- Каждый добавленный элемент отображается как отдельный корень на верхнем уровне
 
 local renderer = require("neo-tree.ui.renderer")
 local file_items = require("neo-tree.sources.common.file-items")
@@ -12,7 +12,7 @@ local M = {
 
 local manager = require("neotree-favorites.manager")
 
---- Load all directory contents recursively
+--- Загрузить всё содержимое папки рекурсивно
 ---@param parent_item table
 ---@param parent_path string
 local function load_all_recursive(parent_item, parent_path)
@@ -48,7 +48,7 @@ local function load_all_recursive(parent_item, parent_path)
       
       if is_dir then
         child.children = {}
-        -- Recursively load contents
+        -- Рекурсивно загружаем содержимое
         load_all_recursive(child, entry)
       else
         child.ext = name:match("%.([^%.]+)$")
@@ -58,7 +58,7 @@ local function load_all_recursive(parent_item, parent_path)
     end
   end
   
-  -- Sort children
+  -- Сортируем
   table.sort(parent_item.children, function(a, b)
     if a.type == b.type then
       return a.name < b.name
@@ -73,11 +73,11 @@ end
 ---@param config table
 ---@param global_config table
 function M.setup(config, global_config)
-  -- No setup required
+  -- Настройка не требуется
 end
 
 
---- Navigate - main method for displaying the tree
+--- Navigate - главный метод для отображения дерева
 ---@param state table
 ---@param path string|nil
 ---@param path_to_reveal string|nil
@@ -92,23 +92,23 @@ function M.navigate(state, path, path_to_reveal, callback, async)
   state.dirty = false
   state.path = path or vim.fn.getcwd()
   
-  -- Create context for file_items
+  -- Создаем контекст для file_items
   local context = file_items.create_context()
   context.state = state
   
-  -- Create root folder
+  -- Создаем корневую папку
   local root = file_items.create_item(context, state.path, "directory")
   root.name = "📦 Flat Favorites"
   root.loaded = true
   root.search_pattern = state.search_pattern
   context.folders[root.path] = root
   
-  -- Get list of favorite items
-  -- Check invalid paths only when opening flat_favorites (slow for large trees)
+  -- Получаем список избранных элементов
+  -- Проверяем invalid пути только при открытии flat_favorites (медленно для больших деревьев)
   local favorites = manager.load_favorites(true)
   
   if not vim.tbl_isempty(favorites) then
-    -- Collect paths and sort
+    -- Собираем пути и сортируем
     local paths = {}
     for fav_path, data in pairs(favorites) do
       table.insert(paths, { path = fav_path, type = data.type })
@@ -121,22 +121,22 @@ function M.navigate(state, path, path_to_reveal, callback, async)
       return a.type == "directory"
     end)
     
-    -- Create items manually WITHOUT file_items to avoid automatic hierarchy
+    -- Создаем элементы вручную БЕЗ file_items чтобы избежать автоматической иерархии
     for _, item_data in ipairs(paths) do
       local fav_path = item_data.path
       local fav_info = favorites[fav_path]
       local name = vim.fn.fnamemodify(fav_path, ":t")
       
-      -- If path is invalid, add indicator to name
+      -- Если путь invalid, добавляем индикатор к имени
       if fav_info and fav_info.invalid then
         name = "⚠️  " .. name
       end
       
-      -- Create item manually
+      -- Создаем элемент вручную
       local item = {
         id = fav_path,
         name = name,
-        parent_path = root.path,  -- Parent is root, NOT the real parent in filesystem!
+        parent_path = root.path,  -- Родитель - root, НЕ реальный parent в ФС!
         path = fav_path,
         type = item_data.type,
         loaded = false,
@@ -149,31 +149,31 @@ function M.navigate(state, path, path_to_reveal, callback, async)
       if item_data.type == "directory" then
         item.children = {}
         context.folders[fav_path] = item
-        -- Load contents only for valid paths
+        -- Загружаем содержимое только для валидных путей
         if not (fav_info and fav_info.invalid) then
           load_all_recursive(item, fav_path)
         else
-          item.loaded = true -- Mark as loaded to prevent loading attempts
+          item.loaded = true -- Помечаем как загруженный чтобы не было попыток загрузить
         end
       end
       
-      -- Add directly to root
+      -- Добавляем напрямую в root
       table.insert(root.children, item)
     end
   end
   
-  -- Set expanded nodes
+  -- Устанавливаем expanded nodes
   state.default_expanded_nodes = {}
   for id, _ in pairs(context.folders) do
     table.insert(state.default_expanded_nodes, id)
   end
   
-  -- Sort root children
+  -- Сортируем детей корня
   if root.children then
     file_items.advanced_sort(root.children, state)
   end
   
-  -- Display tree
+  -- Отображаем дерево
   renderer.show_nodes({ root }, state)
   
   state.loading = false

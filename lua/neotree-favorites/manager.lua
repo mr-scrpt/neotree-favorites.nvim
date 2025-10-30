@@ -1,39 +1,39 @@
--- Manager for flat favorites
--- Stores ONLY explicitly added items (roots), without nested files
--- Per-project storage with auto-cleanup
+-- Менеджер для flat favorites
+-- Хранит ТОЛЬКО явно добавленные элементы (корни), без вложенных файлов
+-- Per-project storage с автоочисткой
 
 local M = {}
 
--- Get project root (git root or cwd)
+-- Получить project root (git root или cwd)
 local function get_project_root()
-  -- Try to find git root
+  -- Пробуем найти git root
   local git_root = vim.fn.systemlist("git rev-parse --show-toplevel")[1]
   if vim.v.shell_error == 0 and git_root then
     return git_root
   end
-  -- Otherwise use cwd
+  -- Иначе используем cwd
   return vim.fn.getcwd()
 end
 
--- Get data file path for current project
+-- Получить путь к файлу данных для текущего проекта
 local function get_data_path()
   local project_root = get_project_root()
-  -- Create safe filename from project path
+  -- Создаем безопасное имя файла из пути проекта
   local safe_name = project_root:gsub("/", "_"):gsub("^_", "")
   return vim.fn.stdpath("data") .. "/neotree-favorites/" .. safe_name .. ".json"
 end
 
--- Cache for each project
+-- Кеш для каждого проекта
 local favorites_cache = {}
 
---- Mark non-existent paths as invalid
+--- Пометить несуществующие пути как invalid
 ---@param favorites table
 ---@return table
 local function mark_invalid_paths(favorites)
   local invalid_count = 0
   
   for path, data in pairs(favorites) do
-    -- Check if path exists
+    -- Проверяем существует ли путь
     local stat = vim.loop.fs_stat(path)
     if not stat then
       data.invalid = true
@@ -53,14 +53,14 @@ local function mark_invalid_paths(favorites)
   return favorites
 end
 
---- Load flat favorites from file
----@param check_invalid boolean|nil Whether to check non-existent paths (slow)
+--- Загрузить flat favorites из файла
+---@param check_invalid boolean|nil Проверять ли несуществующие пути (медленно)
 ---@return table
 function M.load_favorites(check_invalid)
   local data_path = get_data_path()
   
-  -- Check cache for current project
-  -- If check_invalid=true and cache exists, recheck
+  -- Проверяем кеш для текущего проекта
+  -- Если check_invalid=true и кеш есть, перепроверяем
   if favorites_cache[data_path] and not check_invalid then
     return favorites_cache[data_path]
   end
@@ -71,7 +71,7 @@ function M.load_favorites(check_invalid)
     return favorites_cache[data_path]
   end
 
-  -- Check file size
+  -- Проверяем размер файла
   local file_size = vim.loop.fs_stat(data_path).size
   local size_mb = file_size / 1024 / 1024
   if size_mb > 15 then
@@ -89,7 +89,7 @@ function M.load_favorites(check_invalid)
 
   local ok, data = pcall(vim.json.decode, content)
   if ok and type(data) == "table" then
-      -- Mark non-existent paths as invalid only if requested
+    -- Помечаем несуществующие пути как invalid только если запрошено
     if check_invalid then
       data = mark_invalid_paths(data)
     end
@@ -101,12 +101,12 @@ function M.load_favorites(check_invalid)
   return favorites_cache[data_path]
 end
 
---- Save flat favorites to file
+--- Сохранить flat favorites в файл
 ---@param favorites table
 function M.save_favorites(favorites)
   local data_path = get_data_path()
   
-  -- Update cache
+  -- Обновляем кеш
   favorites_cache[data_path] = favorites
 
   local ok, json = pcall(vim.json.encode, favorites)
@@ -115,7 +115,7 @@ function M.save_favorites(favorites)
     return
   end
 
-  -- Create directory if it doesn't exist
+  -- Создаем директорию если не существует
   local dir = vim.fn.stdpath("data") .. "/neotree-favorites"
   vim.fn.mkdir(dir, "p")
 
@@ -129,19 +129,19 @@ function M.save_favorites(favorites)
   file:close()
 end
 
---- Normalize path
+--- Нормализовать путь
 ---@param path string
 ---@return string
 local function normalize_path(path)
   path = vim.fn.fnamemodify(path, ":p")
-  -- Remove trailing slash if not root
+  -- Убираем trailing slash если это не корень
   if path:match("^.+/$") then
     path = path:sub(1, -2)
   end
   return path
 end
 
---- Check if path is a directory
+--- Проверить, является ли путь директорией
 ---@param path string
 ---@return boolean
 local function is_directory(path)
@@ -149,14 +149,14 @@ local function is_directory(path)
   return stat and stat.type == "directory" or false
 end
 
---- Add path to flat favorites
---- Adds ONLY the item itself, without recursive traversal
+--- Добавить путь в flat favorites
+--- Добавляется ТОЛЬКО сам элемент, без рекурсивного обхода
 ---@param path string
 function M.add_path(path)
   local favorites = M.load_favorites()
   local normalized = normalize_path(path)
 
-  -- Add only the selected item itself
+  -- Добавляем только сам выбранный элемент
   if is_directory(normalized) then
     favorites[normalized] = {
       type = "directory",
@@ -174,7 +174,7 @@ function M.add_path(path)
   M.save_favorites(favorites)
 end
 
---- Remove path from flat favorites
+--- Удалить путь из flat favorites
 ---@param path string
 function M.remove_path(path)
   local favorites = M.load_favorites()
@@ -190,7 +190,7 @@ function M.remove_path(path)
   vim.notify("Removed from flat favorites: " .. normalized, vim.log.levels.INFO)
 end
 
---- Check if path is in flat favorites
+--- Проверить, находится ли путь в flat favorites
 ---@param path string
 ---@return boolean
 function M.is_favorite(path)
@@ -199,24 +199,24 @@ function M.is_favorite(path)
   return favorites[normalized] ~= nil
 end
 
---- Get all flat favorites
+--- Получить все flat favorites
 ---@return table
 function M.get_all_favorites()
   return M.load_favorites()
 end
 
---- Clear cache for current project
+--- Очистить кеш для текущего проекта
 function M.clear_cache()
   local data_path = get_data_path()
   favorites_cache[data_path] = nil
 end
 
---- Clear all cache
+--- Очистить весь кеш
 function M.clear_all_cache()
   favorites_cache = {}
 end
 
---- Get information about current project
+--- Получить информацию о текущем проекте
 ---@return table
 function M.get_project_info()
   local project_root = get_project_root()
@@ -231,7 +231,7 @@ function M.get_project_info()
   }
 end
 
---- Clear all favorites for current project
+--- Очистить все избранные для текущего проекта
 function M.clear_all_favorites()
   local data_path = get_data_path()
   local favorites = M.load_favorites()
@@ -242,7 +242,7 @@ function M.clear_all_favorites()
     return
   end
   
-  -- Confirm before clearing
+  -- Подтверждение перед очисткой
   local confirm = vim.fn.confirm(
     string.format("Clear all %d favorites for this project?", count),
     "&Yes\n&No",

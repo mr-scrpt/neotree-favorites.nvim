@@ -1,12 +1,12 @@
--- Commands for working with flat favorites
+-- Команды для работы с flat favorites
 local manager = require("neotree-favorites.manager")
 
 local M = {}
 
---- Add current node to flat favorites
+--- Добавить текущий узел в flat favorites
 ---@param state table
 function M.add_to_flat_favorites(state)
-  -- Does NOT work in flat_favorites source - only in filesystem
+  -- НЕ работает в источнике flat_favorites - только в filesystem
   if state.name == "flat_favorites" then
     vim.notify("Cannot add from flat_favorites view. Use filesystem view (fa)", vim.log.levels.WARN)
     return
@@ -22,14 +22,14 @@ function M.add_to_flat_favorites(state)
   local path = node:get_id()
   manager.add_path(path)
   
-  -- Update indicator display
+  -- Обновляем отображение индикаторов
   local ok, renderer = pcall(require, "neo-tree.ui.renderer")
   if ok then
     pcall(renderer.redraw, state)
   end
 end
 
---- Remove current node from flat favorites
+--- Удалить текущий узел из flat favorites
 ---@param state table
 function M.remove_from_flat_favorites(state)
   local node = state.tree:get_node()
@@ -48,12 +48,12 @@ function M.remove_from_flat_favorites(state)
 
   manager.remove_path(path)
   
-  -- Update display - if in flat_favorites source, do refresh
+  -- Обновляем отображение - если в источнике flat_favorites, делаем refresh
   if state.name == "flat_favorites" then
     local mgr = require("neo-tree.sources.manager")
     mgr.refresh("flat_favorites")
   else
-    -- Otherwise just redraw indicators
+    -- Иначе просто перерисовываем индикаторы
     local ok, renderer = pcall(require, "neo-tree.ui.renderer")
     if ok then
       pcall(renderer.redraw, state)
@@ -61,7 +61,7 @@ function M.remove_from_flat_favorites(state)
   end
 end
 
---- Toggle favorite for current node
+--- Переключить избранное для текущего узла
 ---@param state table
 function M.toggle_flat_favorite(state)
   local node = state.tree:get_node()
@@ -74,10 +74,10 @@ function M.toggle_flat_favorite(state)
   local path = node:get_id()
   
   if manager.is_favorite(path) then
-    -- Remove
+    -- Удаляем
     manager.remove_path(path)
     
-    -- Update display
+    -- Обновляем отображение
     if state.name == "flat_favorites" then
       local mgr = require("neo-tree.sources.manager")
       mgr.refresh("flat_favorites")
@@ -88,10 +88,10 @@ function M.toggle_flat_favorite(state)
       end
     end
   else
-    -- Add
+    -- Добавляем
     manager.add_path(path)
     
-    -- Update indicators
+    -- Обновляем индикаторы
     local ok, renderer = pcall(require, "neo-tree.ui.renderer")
     if ok then
       pcall(renderer.redraw, state)
@@ -99,12 +99,12 @@ function M.toggle_flat_favorite(state)
   end
 end
 
---- Clear all favorites for current project
+--- Очистить все избранные для текущего проекта
 ---@param state table
 function M.clear_all_flat_favorites(state)
   manager.clear_all_favorites()
   
-  -- Refresh the view if in flat_favorites source
+  -- Обновляем отображение - если в источнике flat_favorites, делаем refresh
   if state.name == "flat_favorites" then
     local mgr = require("neo-tree.sources.manager")
     mgr.refresh("flat_favorites")

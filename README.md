@@ -1,5 +1,7 @@
 # neotree-favorites.nvim
 
+> 🤖 This plugin was fully generated and refined by AI (Cascade/Claude)
+
 A smart favorites system for [neo-tree.nvim](https://github.com/nvim-neo-tree/neo-tree.nvim) with per-project storage and auto-cleanup.
 
 ## ✨ Features
@@ -22,7 +24,7 @@ A smart favorites system for [neo-tree.nvim](https://github.com/nvim-neo-tree/ne
     "nvim-lua/plenary.nvim",
     "nvim-tree/nvim-web-devicons",
     "MunifTanjim/nui.nvim",
-    "your-username/neotree-favorites.nvim", -- Add this
+    "mr-scrpt/neotree-favorites.nvim", -- Add this
   },
   opts = {
     sources = {
@@ -44,7 +46,9 @@ A smart favorites system for [neo-tree.nvim](https://github.com/nvim-neo-tree/ne
     
     filesystem = {
       components = {
-        flat_favorite_indicator = require("neotree-favorites.component"),
+        flat_favorite_indicator = function(config, node, state)
+          return require("neotree-favorites.component")(config, node, state)
+        end,
       },
       window = {
         mappings = {
@@ -84,9 +88,15 @@ A smart favorites system for [neo-tree.nvim](https://github.com/nvim-neo-tree/ne
     },
     
     commands = {
-      toggle_flat_favorite = require("neotree-favorites.commands").toggle_flat_favorite,
-      show_favorites_info = require("neotree-favorites.info").show_project_info,
-      clear_all_flat_favorites = require("neotree-favorites.commands").clear_all_flat_favorites,
+      toggle_flat_favorite = function(state)
+        require("neotree-favorites.commands").toggle_flat_favorite(state)
+      end,
+      show_favorites_info = function()
+        require("neotree-favorites.info").show_project_info()
+      end,
+      clear_all_flat_favorites = function(state)
+        require("neotree-favorites.commands").clear_all_flat_favorites(state)
+      end,
     },
   },
   keys = {
@@ -125,6 +135,11 @@ A smart favorites system for [neo-tree.nvim](https://github.com/nvim-neo-tree/ne
 **Switching tabs:**
 - `<` - Previous tab
 - `>` - Next tab
+- Click on tab names in winbar to switch
+
+**Other useful commands:**
+- `?` - Show help with all available keymaps
+- `<esc>` - Close Neo-tree window
 
 ### Indicators
 
@@ -190,3 +205,7 @@ MIT
 ## 🙏 Credits
 
 Built as a custom source for [neo-tree.nvim](https://github.com/nvim-neo-tree/neo-tree.nvim).
+
+## 🤖 About
+
+This plugin was entirely created using AI assistance (Cascade/Claude-3.5-Sonnet). The implementation, documentation, and testing were all AI-generated based on requirements and iterative refinement.

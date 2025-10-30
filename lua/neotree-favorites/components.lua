@@ -1,3 +1,5 @@
--- Empty components file to prevent Neo-tree from throwing an error
--- when trying to auto-load components for this source
-return {}
+-- Import standard Neo-tree components
+-- This allows the source to use all standard components like indent, icon, name, etc.
+local common = require("neo-tree.sources.common.components")
+
+return common

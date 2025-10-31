@@ -111,4 +111,87 @@ function M.clear_all_flat_favorites(state)
   end
 end
 
+--- Helper function to refresh after file operations
+local function refresh_after_operation(state)
+  if state.name == "flat_favorites" then
+    vim.schedule(function()
+      local mgr = require("neo-tree.sources.manager")
+      mgr.refresh("flat_favorites")
+    end)
+  end
+end
+
+--- Wrapper for delete with auto-refresh
+function M.delete(state)
+  local cc = require("neo-tree.sources.common.commands")
+  cc.delete(state)
+  refresh_after_operation(state)
+end
+
+--- Wrapper for add with auto-refresh
+function M.add(state)
+  local cc = require("neo-tree.sources.common.commands")
+  cc.add(state)
+  refresh_after_operation(state)
+end
+
+--- Wrapper for add_directory with auto-refresh
+function M.add_directory(state)
+  local cc = require("neo-tree.sources.common.commands")
+  cc.add_directory(state)
+  refresh_after_operation(state)
+end
+
+--- Wrapper for rename with auto-refresh
+function M.rename(state)
+  local cc = require("neo-tree.sources.common.commands")
+  cc.rename(state)
+  refresh_after_operation(state)
+end
+
+--- Wrapper for move with auto-refresh
+function M.move(state)
+  local cc = require("neo-tree.sources.common.commands")
+  cc.move(state)
+  refresh_after_operation(state)
+end
+
+--- Wrapper for copy with auto-refresh
+function M.copy(state)
+  local cc = require("neo-tree.sources.common.commands")
+  cc.copy(state)
+  refresh_after_operation(state)
+end
+
+--- Wrapper for paste_from_clipboard with auto-refresh
+function M.paste_from_clipboard(state)
+  local cc = require("neo-tree.sources.common.commands")
+  cc.paste_from_clipboard(state)
+  refresh_after_operation(state)
+end
+
+--- Fuzzy finder (/)
+function M.fuzzy_finder(state)
+  local cc = require("neo-tree.sources.common.commands")
+  if cc.fuzzy_finder then
+    cc.fuzzy_finder(state)
+  end
+end
+
+--- Fuzzy finder directory (# or D)
+function M.fuzzy_finder_directory(state)
+  local cc = require("neo-tree.sources.common.commands")
+  if cc.fuzzy_finder_directory then
+    cc.fuzzy_finder_directory(state)
+  end
+end
+
+--- Filter on submit
+function M.filter_on_submit(state)
+  local cc = require("neo-tree.sources.common.commands")
+  if cc.filter_on_submit then
+    cc.filter_on_submit(state)
+  end
+end
+
 return M

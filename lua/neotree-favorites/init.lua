@@ -73,14 +73,29 @@ end
 ---@param config table
 ---@param global_config table
 function M.setup(config, global_config)
-  -- Используем стандартные команды filesystem
-  -- Neo-tree автоматически будет использовать их для нашего source
-end
-
---- Get default commands from filesystem
-function M.default_commands()
-  local cc = require("neo-tree.sources.common.commands")
-  return cc
+  local events = require("neo-tree.events")
+  local mgr = require("neo-tree.sources.manager")
+  
+  -- Подписываемся на события файловой системы для авто-обновления
+  mgr.subscribe(M.name, {
+    event = events.FS_EVENT,
+    handler = function()
+      mgr.refresh(M.name)
+    end,
+  })
+  
+  -- Подписываемся на изменения в буферах (для случаев когда файл изменен через nvim)
+  if global_config.enable_refresh_on_write then
+    mgr.subscribe(M.name, {
+      event = events.VIM_BUFFER_CHANGED,
+      handler = function(arg)
+        local afile = arg.afile or ""
+        if afile ~= "" and vim.fn.filereadable(afile) == 1 then
+          mgr.refresh(M.name)
+        end
+      end,
+    })
+  end
 end
 
 

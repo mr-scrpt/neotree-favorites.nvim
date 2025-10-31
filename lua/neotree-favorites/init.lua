@@ -70,7 +70,8 @@ end
 ---@param parent_item table
 ---@param parent_path string
 ---@param context table
-local function load_all_recursive(parent_item, parent_path, context)
+---@param favorites_set table|nil Set избранных путей (для пропуска дубликатов)
+local function load_all_recursive(parent_item, parent_path, context, favorites_set)
   local scan = require("plenary.scandir")
   
   local success, entries = pcall(scan.scan_dir, parent_path, {
@@ -92,6 +93,11 @@ local function load_all_recursive(parent_item, parent_path, context)
   end
   
   for _, entry in ipairs(entries) do
+    -- Пропускаем если этот путь уже добавлен в избранное явно
+    if favorites_set and favorites_set[entry] then
+      goto continue
+    end
+    
     local stat = vim.loop.fs_stat(entry)
     if stat then
       local name = vim.fn.fnamemodify(entry, ":t")
@@ -111,14 +117,16 @@ local function load_all_recursive(parent_item, parent_path, context)
       
       if is_dir then
         child.children = {}
-        -- Рекурсивно загружаем содержимое
-        load_all_recursive(child, entry, context)
+        -- Рекурсивно загружаем содержимое (передаем favorites_set)
+        load_all_recursive(child, entry, context, favorites_set)
       else
         child.ext = name:match("%.([^%.]+)$")
       end
       
       table.insert(parent_item.children, child)
     end
+    
+    ::continue::
   end
   
   -- Сортируем
@@ -203,6 +211,12 @@ function M.navigate(state, path, path_to_reveal, callback, async)
   local favorites = manager.load_favorites(true)
   
   if not vim.tbl_isempty(favorites) then
+    -- Создаем set из избранных путей для быстрой проверки
+    local favorites_set = {}
+    for fav_path, _ in pairs(favorites) do
+      favorites_set[fav_path] = true
+    end
+    
     -- Собираем пути и сортируем
     local paths = {}
     for fav_path, data in pairs(favorites) do
@@ -216,11 +230,27 @@ function M.navigate(state, path, path_to_reveal, callback, async)
       return a.type == "directory"
     end)
     
+    -- Находим дубликаты по имени на верхнем уровне
+    local name_counts = {}
+    for _, item_data in ipairs(paths) do
+      local name = vim.fn.fnamemodify(item_data.path, ":t")
+      name_counts[name] = (name_counts[name] or 0) + 1
+    end
+    
     -- Создаем элементы вручную БЕЗ file_items чтобы избежать автоматической иерархии
     for _, item_data in ipairs(paths) do
       local fav_path = item_data.path
       local fav_info = favorites[fav_path]
       local name = vim.fn.fnamemodify(fav_path, ":t")
+      
+      -- Если есть дубликаты по имени, добавляем путь в скобках
+      if name_counts[name] > 1 then
+        -- Получаем относительный путь от cwd
+        local relative_path = vim.fn.fnamemodify(fav_path, ":~:h")
+        -- Убираем начальный ./ если есть
+        relative_path = relative_path:gsub("^%./", "")
+        name = name .. " (" .. relative_path .. ")"
+      end
       
       -- Если путь invalid, добавляем индикатор к имени
       if fav_info and fav_info.invalid then
@@ -247,7 +277,7 @@ function M.navigate(state, path, path_to_reveal, callback, async)
         context.folders[fav_path] = item
         -- Загружаем содержимое только для валидных путей
         if not (fav_info and fav_info.invalid) then
-          load_all_recursive(item, fav_path, context)
+          load_all_recursive(item, fav_path, context, favorites_set)
         else
           item.loaded = true -- Помечаем как загруженный чтобы не было попыток загрузить
         end

@@ -6,26 +6,29 @@ local common_filter = require("neo-tree.sources.common.filters")
 -- НАСЛЕДУЕМ ВСЕ команды из filesystem
 local M = vim.tbl_extend("force", {}, filesystem_commands)
 
--- ПЕРЕОПРЕДЕЛЯЕМ fuzzy_finder - используем ОБЩИЙ filter вместо filesystem-specific
+-- ПЕРЕОПРЕДЕЛЯЕМ fuzzy_finder - используем НАШ filter который вызывает flat_favorites.reset_search
 M.fuzzy_finder = function(state)
+  local filter = require("neotree-favorites.filter")
   local config = state.config or {}
-  common_filter.show_filter(state, true, config.keep_filter_on_submit or false)
+  filter.show_filter(state, true, config.keep_filter_on_submit or false)
 end
 
 M.fuzzy_sorter = function(state)
+  local filter = require("neotree-favorites.filter")
   local config = state.config or {}
-  common_filter.show_filter(state, true, config.keep_filter_on_submit or false)
+  filter.show_filter(state, true, config.keep_filter_on_submit or false)
 end
 
 M.filter_on_submit = function(state)
+  local filter = require("neotree-favorites.filter")
   local config = state.config or {}
-  common_filter.show_filter(state, false, config.keep_filter_on_submit or false)
+  filter.show_filter(state, false, config.keep_filter_on_submit or false)
 end
 
 M.fuzzy_finder_directory = function(state)
+  local filter = require("neotree-favorites.filter")
   local config = state.config or {}
-  -- Поведение как обычного фильтра, без directory-only режима
-  common_filter.show_filter(state, true, config.keep_filter_on_submit or false)
+  filter.show_filter(state, true, config.keep_filter_on_submit or false)
 end
 
 M.clear_filter = function(state)

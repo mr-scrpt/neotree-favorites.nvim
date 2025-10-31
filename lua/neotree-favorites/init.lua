@@ -73,7 +73,14 @@ end
 ---@param config table
 ---@param global_config table
 function M.setup(config, global_config)
-  -- Настройка не требуется
+  -- Используем стандартные команды filesystem
+  -- Neo-tree автоматически будет использовать их для нашего source
+end
+
+--- Get default commands from filesystem
+function M.default_commands()
+  local cc = require("neo-tree.sources.common.commands")
+  return cc
 end
 
 

@@ -73,9 +73,16 @@ end
 ---@param favorites_set table|nil Set избранных путей (для пропуска дубликатов)
 local function load_all_recursive(parent_item, parent_path, context, favorites_set)
   local scan = require("plenary.scandir")
+  local state = context.state
+  local filtered_items = state.filtered_items or {}
+  
+  -- Определяем какие файлы показывать (как в filesystem)
+  local show_hidden = filtered_items.visible or false
+  local log = require("neo-tree.log")
   
   local success, entries = pcall(scan.scan_dir, parent_path, {
-    hidden = false,
+    hidden = show_hidden,  -- Показывать dotfiles если visible=true
+    -- НЕ используем respect_gitignore т.к. mark_ignored работает лучше (учитывает родительские .gitignore)
     depth = 1,
     add_dirs = true,
   })
@@ -86,6 +93,107 @@ local function load_all_recursive(parent_item, parent_path, context, favorites_s
   end
   
   parent_item.children = {}
+  
+  -- Простая собственная реализация gitignore фильтрации
+  local utils = require("neo-tree.utils")
+  local temp_items = {}
+  for _, entry in ipairs(entries) do
+    local item = { 
+      path = entry, 
+      type = vim.fn.isdirectory(entry) == 1 and "directory" or "file" 
+    }
+    
+    -- Проверяем gitignore используя plenary
+    local _, name = utils.split_path(entry)
+    if name then
+      -- Ищем .gitignore вверх по дереву от parent_path
+      local gitignore_files = vim.fs.find(".gitignore", { 
+        upward = true, 
+        limit = math.huge, 
+        path = parent_path, 
+        type = "file" 
+      })
+      
+      -- Проверяем является ли файл gitignored
+      for _, gitignore_path in ipairs(gitignore_files) do
+        local gitignore_dir = vim.fn.fnamemodify(gitignore_path, ":h")
+        -- Проверяем что entry находится под этой gitignore директорией
+        if vim.startswith(entry, gitignore_dir) then
+          -- Читаем .gitignore и проверяем паттерны
+          local gitignore_content = vim.fn.readfile(gitignore_path)
+          for _, pattern in ipairs(gitignore_content) do
+            -- Пропускаем комментарии и пустые строки
+            pattern = vim.trim(pattern)
+            if pattern ~= "" and not vim.startswith(pattern, "#") then
+              -- Убираем leading/trailing слэши
+              local clean_pattern = pattern:gsub("^/", ""):gsub("/$", "")
+              
+              -- Проверяем соответствие паттерну
+              local matches = false
+              if clean_pattern:find("[*?%[]") then
+                -- Glob паттерн - преобразуем в regex
+                local regex_pattern = vim.fn.glob2regpat(clean_pattern)
+                matches = vim.fn.match(name, regex_pattern) ~= -1
+              else
+                -- Точное совпадение
+                matches = (name == clean_pattern)
+              end
+              
+              if matches then
+                item.filtered_by = item.filtered_by or {}
+                item.filtered_by.ignored = true
+                item.filtered_by.ignore_file = gitignore_path
+                break
+              end
+            end
+          end
+          if item.filtered_by and item.filtered_by.ignored then
+            break
+          end
+        end
+      end
+    end
+    
+    table.insert(temp_items, item)
+  end
+  
+  -- Дополнительно помечаем dotfiles (как в common/file-items.lua:263)
+  -- Помечаем ВСЕГДА, чтобы когда visible=true они отображались серым
+  for _, item in ipairs(temp_items) do
+    local _, name = utils.split_path(item.path)
+    if name and string.sub(name, 1, 1) == "." then
+      item.filtered_by = item.filtered_by or {}
+      item.filtered_by.dotfiles = true
+    end
+  end
+  
+  -- Создаем lookup для filtered_by по пути
+  local filtered_by_lookup = {}
+  for _, item in ipairs(temp_items) do
+    filtered_by_lookup[item.path] = item.filtered_by
+  end
+  
+  -- Фильтруем entries по результатам mark_ignored и dotfiles
+  local filtered_entries = {}
+  for i, item in ipairs(temp_items) do
+    local should_include = true
+    
+    if not show_hidden and item.filtered_by then
+      -- Скрываем gitignored если hide_gitignored
+      if item.filtered_by.ignored and filtered_items.hide_gitignored then
+        should_include = false
+      end
+      -- Скрываем dotfiles если hide_dotfiles
+      if item.filtered_by.dotfiles and filtered_items.hide_dotfiles then
+        should_include = false
+      end
+    end
+    
+    if should_include then
+      table.insert(filtered_entries, entries[i])
+    end
+  end
+  entries = filtered_entries
   
   -- Setup file watcher for this directory (call on_directory_loaded like filesystem does)
   if context then
@@ -113,6 +221,7 @@ local function load_all_recursive(parent_item, parent_path, context, favorites_s
         extra = {
           search_path = entry,  -- КРИТИЧНО для фильтрации
         },
+        filtered_by = filtered_by_lookup[entry],  -- Добавляем статус (gitignored, dotfile, etc)
       }
       
       if is_dir then
@@ -147,6 +256,11 @@ function M.setup(config, global_config)
   local events = require("neo-tree.events")
   local mgr = require("neo-tree.sources.manager")
   local log = require("neo-tree.log")
+  
+  -- Инициализируем filtered_items (как в filesystem.setup)
+  config.filtered_items = config.filtered_items or {}
+  local defaults = require("neo-tree.defaults").filesystem.filtered_items
+  config.filtered_items = vim.tbl_deep_extend("force", vim.deepcopy(defaults), config.filtered_items)
   
   -- Подписываемся на события файловой системы для авто-обновления (как filesystem)
   if config.use_libuv_file_watcher then

@@ -6,6 +6,22 @@ local common_filter = require("neo-tree.sources.common.filters")
 -- НАСЛЕДУЕМ ВСЕ команды из filesystem
 local M = vim.tbl_extend("force", {}, filesystem_commands)
 
+-- ПЕРЕОПРЕДЕЛЯЕМ toggle_hidden для flat_favorites
+M.toggle_hidden = function(state)
+  state.filtered_items.visible = not state.filtered_items.visible
+  local log = require("neo-tree.log")
+  log.info("Toggling hidden files: " .. tostring(state.filtered_items.visible))
+  
+  -- Обновляем только filtered_items в default config чтобы изменение сохранилось при refresh
+  local mgr = require("neo-tree.sources.manager")
+  mgr.set_default_config(state.name, {
+    filtered_items = vim.deepcopy(state.filtered_items)
+  })
+  
+  -- Refresh
+  mgr.refresh("flat_favorites")
+end
+
 -- ПЕРЕОПРЕДЕЛЯЕМ fuzzy_finder - используем НАШ filter который вызывает flat_favorites.reset_search
 -- "/" - строгий поиск (substring match)
 M.fuzzy_finder = function(state)
@@ -144,6 +160,38 @@ function M.clear_all_flat_favorites(state)
   manager.clear_all_favorites()
   
   -- Обновляем отображение - если в источнике flat_favorites, делаем refresh
+  if state.name == "flat_favorites" then
+    local mgr = require("neo-tree.sources.manager")
+    mgr.refresh("flat_favorites")
+  end
+end
+
+--- Удалить все устаревшие пути (deleted/moved) из избранного
+---@param state table
+function M.remove_invalid_favorites(state)
+  local favorites = manager.load_favorites()
+  local invalid_paths = {}
+  
+  -- Находим устаревшие пути
+  for path, _ in pairs(favorites) do
+    if vim.fn.filereadable(path) == 0 and vim.fn.isdirectory(path) == 0 then
+      table.insert(invalid_paths, path)
+    end
+  end
+  
+  if #invalid_paths == 0 then
+    vim.notify("No invalid paths found in favorites", vim.log.levels.INFO)
+    return
+  end
+  
+  -- Удаляем все устаревшие пути
+  for _, path in ipairs(invalid_paths) do
+    manager.remove_path(path)
+  end
+  
+  vim.notify(string.format("Removed %d invalid path(s) from favorites", #invalid_paths), vim.log.levels.INFO)
+  
+  -- Обновляем отображение
   if state.name == "flat_favorites" then
     local mgr = require("neo-tree.sources.manager")
     mgr.refresh("flat_favorites")

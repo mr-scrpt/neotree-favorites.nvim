@@ -15,11 +15,23 @@ local M = {}
 
 ---Show filtered tree (из common.filters:57-94)
 local function show_filtered_tree(state, do_not_focus_window)
+  -- По умолчанию используем substring search если use_fzy не установлен
   local use_fzy = state.use_fzy
+  if use_fzy == nil then
+    use_fzy = false
+    log.info("[SHOW_FILTERED_TREE] WARNING: use_fzy was nil, defaulting to false (substring)")
+  end
+  
+  log.info("▶▶▶ [SHOW_FILTERED_TREE] START")
+  log.info("[SHOW_FILTERED_TREE] Pattern: '" .. (state.search_pattern or "nil") .. "'")
+  log.info("[SHOW_FILTERED_TREE] use_fzy:", use_fzy)
+  log.info("[SHOW_FILTERED_TREE] orig_tree nodes:", #state.orig_tree:get_nodes())
   
   -- Копируем оригинальное дерево и фильтруем копию (НЕ пересоздаем!)
   state.tree = vim.deepcopy(state.orig_tree)
   state.tree:get_nodes()[1].search_pattern = state.search_pattern
+  
+  log.info("[SHOW_FILTERED_TREE] After deepcopy, tree nodes:", #state.tree:get_nodes())
   
   local max_score, max_id = fzy.get_score_min(), nil
   local folders_to_expand = {}  -- Папки с совпадениями которые нужно раскрыть
@@ -45,6 +57,10 @@ local function show_filtered_tree(state, do_not_focus_window)
       local lower_path = path:lower()
       local lower_pattern = state.search_pattern:lower()
       should_keep = lower_path:find(lower_pattern, 1, true) ~= nil
+      -- Запоминаем первый найденный файл для фокуса
+      if should_keep and not max_id and node.type == "file" then
+        max_id = node_id
+      end
     end
     
     local has_matching_children = false
@@ -70,10 +86,15 @@ local function show_filtered_tree(state, do_not_focus_window)
   end
   
   if state.search_pattern and #state.search_pattern > 0 then
+    log.info("[SHOW_FILTERED_TREE] Starting filter_tree")
     for _, root in ipairs(state.tree:get_nodes()) do
       filter_tree(root:get_id())
     end
+    log.info("[SHOW_FILTERED_TREE] Finished filter_tree")
   end
+  
+  log.info("[SHOW_FILTERED_TREE] After filter, tree nodes:", #state.tree:get_nodes())
+  log.info("[SHOW_FILTERED_TREE] folders_to_expand count:", #folders_to_expand)
   
   -- Раскрываем папки с совпадениями через default_expanded_nodes (как в fs_scan.lua:653)
   if #folders_to_expand > 0 then
@@ -86,20 +107,33 @@ local function show_filtered_tree(state, do_not_focus_window)
   end
   
   -- Используем renderer.redraw вместо manager.redraw для сохранения expanded
+  log.info("[SHOW_FILTERED_TREE] Calling renderer.redraw")
   renderer.redraw(state)
   
   if max_id then
+    log.info("[SHOW_FILTERED_TREE] Focusing on:", max_id)
     renderer.focus_node(state, max_id, do_not_focus_window)
   end
+  
+  log.info("◀◀◀ [SHOW_FILTERED_TREE] END")
 end
 
 M.show_filter = function(state, search_as_you_type, use_fzy, keep_filter_on_submit)
+  log.info("═══════════════════════════════════════════════")
+  log.info("[SHOW_FILTER] Called with:")
+  log.info("  search_as_you_type:", search_as_you_type)
+  log.info("  use_fzy:", use_fzy)
+  log.info("  keep_filter_on_submit:", keep_filter_on_submit)
+  log.info("  state.search_pattern:", state.search_pattern)
+  log.info("═══════════════════════════════════════════════")
+  
   local winid = vim.api.nvim_get_current_win()
   local height = vim.api.nvim_win_get_height(winid)
   local scroll_padding = 3
   
-  -- Устанавливаем режим поиска
+  -- Устанавливаем режим поиска и сохраняем оригинальное значение
   state.use_fzy = use_fzy
+  local original_use_fzy = use_fzy  -- Сохраняем для восстановления при очистке
   
   -- Меняем заголовок в зависимости от режима
   local popup_msg
@@ -126,14 +160,19 @@ M.show_filter = function(state, search_as_you_type, use_fzy, keep_filter_on_subm
     size = width,
   })
   
-  -- КРИТИЧНО: Сохраняем оригинальное дерево ОДИН раз (как common.filters:124)
-  state.orig_tree = vim.deepcopy(state.tree)
+  -- КРИТИЧНО: Сохраняем оригинальное дерево ТОЛЬКО ОДИН РАЗ (как common.filters:124)
+  if not state.orig_tree then
+    log.info("[SHOW_FILTER] Saving NEW orig_tree, nodes count:", #state.tree:get_nodes())
+    state.orig_tree = vim.deepcopy(state.tree)
+  else
+    log.info("[SHOW_FILTER] orig_tree ALREADY EXISTS, NOT overwriting. nodes count:", #state.orig_tree:get_nodes())
+  end
   
   -- Сохраняем открытые папки перед поиском
   local has_pre_search_folders = utils.truthy(state.open_folders_before_search)
   if not has_pre_search_folders then
-    log.trace("Recording pre-search folders")
     state.open_folders_before_search = renderer.get_expanded_nodes(state.tree)
+    log.info("[SHOW_FILTER] Saved open_folders_before_search")
   end
   
   local waiting_for_default_value = utils.truthy(state.search_pattern)
@@ -157,43 +196,70 @@ M.show_filter = function(state, search_as_you_type, use_fzy, keep_filter_on_subm
       end
     end,
     on_change = function(value)
+      log.info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+      log.info("[ON_CHANGE] Input value: '" .. (value or "nil") .. "'")
+      log.info("[ON_CHANGE] Current state.search_pattern: '" .. (state.search_pattern or "nil") .. "'")
+      log.info("[ON_CHANGE] state.use_fzy:", state.use_fzy)
+      
       if not search_as_you_type then
+        log.info("[ON_CHANGE] Skipping - not search_as_you_type")
         return
       end
       
       -- Обработка default value
       if waiting_for_default_value then
+        log.info("[ON_CHANGE] In waiting_for_default_value mode")
         if #value < #(state.search_pattern or "") then
+          log.info("[ON_CHANGE] Skipping - waiting for default value")
           return
         end
         waiting_for_default_value = false
+        log.info("[ON_CHANGE] Exited waiting_for_default_value mode")
       end
       
       if value == state.search_pattern or value == nil then
+        log.info("[ON_CHANGE] Skipping - value unchanged or nil")
         return
       end
       
       if value == "" then
         if state.search_pattern == nil then
+          log.info("[ON_CHANGE] Skipping - already cleared")
           return
         end
-        log.trace("Clearing search in on_change")
-        -- НЕ вызываем reset_search - просто сбрасываем pattern и восстанавливаем дерево
-        state.search_pattern = nil
-        if state.orig_tree then
-          state.tree = vim.deepcopy(state.orig_tree)
-          manager.redraw(state.name)
+        log.info("[ON_CHANGE] CLEARING SEARCH")
+        
+        -- Сохраняем open_folders_before_search как в filesystem (filter.lua:159-164)
+        local original_open_folders = nil
+        if type(state.open_folders_before_search) == "table" then
+          original_open_folders = vim.deepcopy(state.open_folders_before_search, compat.noref())
         end
+        
+        -- Вызываем reset_search как в filesystem
+        local flat_favorites = require("neotree-favorites")
+        flat_favorites.reset_search(state)
+        
+        -- Восстанавливаем open_folders_before_search
+        state.open_folders_before_search = original_open_folders
+        log.info("[ON_CHANGE] Called reset_search")
       else
-        log.trace("Setting search to:", value)
+        log.info("[ON_CHANGE] SETTING NEW SEARCH: '" .. value .. "'")
         state.search_pattern = value
         
         -- Debounce фильтрацию
         local delay = #value > 3 and 100 or (#value > 2 and 200 or (#value > 1 and 400 or 500))
+        log.info("[ON_CHANGE] Debouncing filter with delay:", delay)
         utils.debounce(state.name .. "_filter", function()
+          -- Проверяем что pattern все еще установлен (не был очищен)
+          if not state.search_pattern or state.search_pattern == "" then
+            log.info("[DEBOUNCED] SKIPPING - pattern was cleared")
+            return
+          end
+          log.info("[DEBOUNCED] Starting filter for pattern: '" .. state.search_pattern .. "'")
           show_filtered_tree(state, true)
         end, delay, utils.debounce_strategy.CALL_LAST_ONLY)
       end
+      log.info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
     end,
   })
   

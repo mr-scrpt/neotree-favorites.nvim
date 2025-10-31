@@ -1,7 +1,34 @@
 -- Команды для работы с flat favorites
 local manager = require("neotree-favorites.manager")
+local filesystem_commands = require("neo-tree.sources.filesystem.commands")
+local common_filter = require("neo-tree.sources.common.filters") -- ОБЩИЙ filter!
 
-local M = {}
+-- НАСЛЕДУЕМ ВСЕ команды из filesystem
+local M = vim.tbl_extend("force", {}, filesystem_commands)
+
+-- ПЕРЕОПРЕДЕЛЯЕМ fuzzy_finder - используем ОБЩИЙ filter вместо filesystem-specific
+M.fuzzy_finder = function(state)
+  local config = state.config or {}
+  -- Используем ОБЩИЙ common.filters.show_filter!
+  common_filter.show_filter(state, true, config.keep_filter_on_submit or false)
+end
+
+M.fuzzy_sorter = function(state)
+  local config = state.config or {}
+  common_filter.show_filter(state, true, config.keep_filter_on_submit or false)
+end
+
+M.filter_on_submit = function(state)
+  local config = state.config or {}
+  common_filter.show_filter(state, false, config.keep_filter_on_submit or false)
+end
+
+M.clear_filter = function(state)
+  state.search_pattern = nil
+  state.fuzzy_finder_mode = nil
+  local mgr = require("neo-tree.sources.manager")
+  mgr.refresh(state.name)
+end
 
 --- Добавить текущий узел в flat favorites
 ---@param state table

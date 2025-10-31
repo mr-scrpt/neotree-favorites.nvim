@@ -5,9 +5,15 @@ local renderer = require("neo-tree.ui.renderer")
 local file_items = require("neo-tree.sources.common.file-items")
 local utils = require("neo-tree.utils")
 
+-- Берем window defaults из filesystem для fuzzy_finder
+local filesystem_defaults = require("neo-tree.defaults").filesystem
+
 local M = {
   name = "flat_favorites",
   display_name = "📦 Flat Favorites",
+  
+  -- Берем window config из filesystem (включая fuzzy_finder mappings)
+  window = vim.deepcopy(filesystem_defaults.window),
 }
 
 local manager = require("neotree-favorites.manager")
@@ -97,6 +103,9 @@ local function load_all_recursive(parent_item, parent_path, context)
         path = entry,
         type = is_dir and "directory" or "file",
         loaded = false,
+        extra = {
+          search_path = entry,  -- КРИТИЧНО для фильтрации
+        },
       }
       
       if is_dir then
@@ -183,6 +192,8 @@ function M.navigate(state, path, path_to_reveal, callback, async)
   local root = file_items.create_item(context, state.path, "directory")
   root.name = "📦 Flat Favorites"
   root.loaded = true
+  root.extra = root.extra or {}
+  root.extra.search_path = root.path
   root.search_pattern = state.search_pattern
   context.folders[root.path] = root
   
@@ -224,6 +235,7 @@ function M.navigate(state, path, path_to_reveal, callback, async)
         type = item_data.type,
         loaded = false,
         extra = { 
+          search_path = fav_path,  -- Для фильтрации
           is_flat_favorite = true,
           is_invalid = fav_info and fav_info.invalid or false,
         },

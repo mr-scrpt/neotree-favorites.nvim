@@ -32,6 +32,7 @@ local function show_filtered_tree(state, do_not_focus_window)
     if should_keep then
       local score = fzy.score(state.search_pattern, path)
       node.extra.fzy_score = score
+      log.info(string.format("[MATCH] %s (score: %.2f)", path, score))
       if score > max_score then
         max_score = score
         max_id = node_id
@@ -52,10 +53,16 @@ local function show_filtered_tree(state, do_not_focus_window)
     -- Если папка содержит совпадения, добавляем в список для раскрытия
     if node.type == "directory" and (should_keep or has_matching_children) then
       table.insert(folders_to_expand, node_id)
+      log.info(string.format("[EXPAND] %s (dir has matches)", path))
     end
     
     if not should_keep then
+      log.info(string.format("[REMOVE] %s (no match)", path))
       state.tree:remove_node(node_id)
+    else
+      if not fzy.has_match(state.search_pattern, path) then
+        log.info(string.format("[KEEP] %s (parent of match)", path))
+      end
     end
     return should_keep
   end

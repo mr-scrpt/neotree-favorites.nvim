@@ -12,6 +12,10 @@ local M = {
 
 local manager = require("neotree-favorites.manager")
 
+local wrap = function(func)
+  return utils.wrap(func, M.name)
+end
+
 --- Load all directory contents recursively
 ---@param parent_item table
 ---@param parent_path string
@@ -32,20 +36,22 @@ local function load_all_recursive(parent_item, parent_path, context)
   
   parent_item.children = {}
   
-  -- Настраиваем file watcher для этой папки
+  -- Настраиваем file watcher для этой папки (как в filesystem source)
   if context and context.state and context.state.use_libuv_file_watcher then
     local fs_watch = require("neo-tree.sources.filesystem.lib.fs_watch")
     local events = require("neo-tree.events")
-    local mgr = require("neo-tree.sources.manager")
+    local log = require("neo-tree.log")
     
     local fs_watch_callback = vim.schedule_wrap(function(err, fname)
       if err then
+        log.error("file_event_callback: ", err)
         return
       end
-      -- Обновляем дерево при изменениях
-      mgr.refresh(M.name)
+      -- Генерируем событие FS_EVENT (как в filesystem source)
+      events.fire_event(events.FS_EVENT, { afile = parent_path })
     end)
     
+    log.trace("Adding fs watcher for", parent_path)
     fs_watch.watch_folder(parent_path, fs_watch_callback)
   end
   
@@ -93,26 +99,31 @@ end
 function M.setup(config, global_config)
   local events = require("neo-tree.events")
   local mgr = require("neo-tree.sources.manager")
+  local log = require("neo-tree.log")
   
-  -- Подписываемся на события файловой системы для авто-обновления
-  mgr.subscribe(M.name, {
-    event = events.FS_EVENT,
-    handler = function()
-      mgr.refresh(M.name)
-    end,
-  })
-  
-  -- Подписываемся на изменения в буферах (для случаев когда файл изменен через nvim)
-  if global_config.enable_refresh_on_write then
+  -- Подписываемся на события файловой системы для авто-обновления (как filesystem)
+  if config.use_libuv_file_watcher then
     mgr.subscribe(M.name, {
-      event = events.VIM_BUFFER_CHANGED,
-      handler = function(arg)
-        local afile = arg.afile or ""
-        if afile ~= "" and vim.fn.filereadable(afile) == 1 then
-          mgr.refresh(M.name)
-        end
-      end,
+      event = events.FS_EVENT,
+      handler = wrap(mgr.refresh),
     })
+  else
+    -- Отключаем все watchers если file watcher выключен
+    require("neo-tree.sources.filesystem.lib.fs_watch").unwatch_all()
+    if global_config.enable_refresh_on_write then
+      mgr.subscribe(M.name, {
+        event = events.VIM_BUFFER_CHANGED,
+        handler = function(arg)
+          local afile = arg.afile or ""
+          if utils.is_real_file(afile) then
+            log.trace("refreshing due to vim_buffer_changed event: ", afile)
+            mgr.refresh(M.name)
+          else
+            log.trace("Ignoring vim_buffer_changed event for non-file: ", afile)
+          end
+        end,
+      })
+    end
   end
 end
 

@@ -15,17 +15,15 @@ local M = {}
 
 ---Show filtered tree (из common.filters:57-94)
 local function show_filtered_tree(state, do_not_focus_window)
-  log.info("=== show_filtered_tree START ===")
-  log.info("search_pattern:", state.search_pattern)
-  log.info("orig_tree nodes count:", #state.orig_tree:get_nodes())
+  log.trace("Filtering tree with pattern:", state.search_pattern)
   
   -- Копируем оригинальное дерево и фильтруем копию (НЕ пересоздаем!)
   state.tree = vim.deepcopy(state.orig_tree)
   state.tree:get_nodes()[1].search_pattern = state.search_pattern
   
-  log.info("tree after deepcopy, nodes count:", #state.tree:get_nodes())
-  
   local max_score, max_id = fzy.get_score_min(), nil
+  local folders_to_expand = {}  -- Папки с совпадениями которые нужно раскрыть
+  
   local function filter_tree(node_id)
     local node = state.tree:get_node(node_id)
     local path = node.extra.search_path or node.path
@@ -40,11 +38,22 @@ local function show_filtered_tree(state, do_not_focus_window)
       end
     end
     
+    local has_matching_children = false
     if node:has_children() then
       for _, child_id in ipairs(node:get_child_ids()) do
-        should_keep = filter_tree(child_id) or should_keep
+        local child_kept = filter_tree(child_id)
+        if child_kept then
+          has_matching_children = true
+        end
+        should_keep = child_kept or should_keep
       end
     end
+    
+    -- Если папка содержит совпадения, добавляем в список для раскрытия
+    if node.type == "directory" and (should_keep or has_matching_children) then
+      table.insert(folders_to_expand, node_id)
+    end
+    
     if not should_keep then
       state.tree:remove_node(node_id)
     end
@@ -53,26 +62,27 @@ local function show_filtered_tree(state, do_not_focus_window)
   
   if state.search_pattern and #state.search_pattern > 0 then
     for _, root in ipairs(state.tree:get_nodes()) do
-      log.info("Filtering root:", root:get_id())
       filter_tree(root:get_id())
     end
   end
   
-  log.info("tree after filter, nodes count:", #state.tree:get_nodes())
-  local root = state.tree:get_nodes()[1]
-  if root and root.children then
-    log.info("root children count:", #root.children)
-    for i, child in ipairs(root.children) do
-      log.info(string.format("  child[%d]: %s (type=%s)", i, child.name, child.type))
-    end
+  -- Раскрываем папки с совпадениями через default_expanded_nodes (как в fs_scan.lua:653)
+  if #folders_to_expand > 0 then
+    state.default_expanded_nodes = folders_to_expand
+    log.trace("Expanding", #folders_to_expand, "folders with matches")
   end
   
-  -- КРИТИЧНО: redraw а не refresh! Не пересоздаем дерево
-  manager.redraw(state.name)
+  -- Применяем раскрытие папок ДО redraw
+  if #folders_to_expand > 0 and state.tree then
+    renderer.set_expanded_nodes(state.tree, folders_to_expand)
+  end
+  
+  -- Используем renderer.redraw вместо manager.redraw для сохранения expanded
+  renderer.redraw(state)
+  
   if max_id then
     renderer.focus_node(state, max_id, do_not_focus_window)
   end
-  log.info("=== show_filtered_tree END ===")
 end
 
 M.show_filter = function(state, search_as_you_type, keep_filter_on_submit)

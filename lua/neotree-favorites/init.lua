@@ -12,10 +12,11 @@ local M = {
 
 local manager = require("neotree-favorites.manager")
 
---- Загрузить всё содержимое папки рекурсивно
+--- Load all directory contents recursively
 ---@param parent_item table
 ---@param parent_path string
-local function load_all_recursive(parent_item, parent_path)
+---@param context table
+local function load_all_recursive(parent_item, parent_path, context)
   local scan = require("plenary.scandir")
   
   local success, entries = pcall(scan.scan_dir, parent_path, {
@@ -30,6 +31,23 @@ local function load_all_recursive(parent_item, parent_path)
   end
   
   parent_item.children = {}
+  
+  -- Настраиваем file watcher для этой папки
+  if context and context.state and context.state.use_libuv_file_watcher then
+    local fs_watch = require("neo-tree.sources.filesystem.lib.fs_watch")
+    local events = require("neo-tree.events")
+    local mgr = require("neo-tree.sources.manager")
+    
+    local fs_watch_callback = vim.schedule_wrap(function(err, fname)
+      if err then
+        return
+      end
+      -- Обновляем дерево при изменениях
+      mgr.refresh(M.name)
+    end)
+    
+    fs_watch.watch_folder(parent_path, fs_watch_callback)
+  end
   
   for _, entry in ipairs(entries) do
     local stat = vim.loop.fs_stat(entry)
@@ -49,7 +67,7 @@ local function load_all_recursive(parent_item, parent_path)
       if is_dir then
         child.children = {}
         -- Рекурсивно загружаем содержимое
-        load_all_recursive(child, entry)
+        load_all_recursive(child, entry, context)
       else
         child.ext = name:match("%.([^%.]+)$")
       end
@@ -173,7 +191,7 @@ function M.navigate(state, path, path_to_reveal, callback, async)
         context.folders[fav_path] = item
         -- Загружаем содержимое только для валидных путей
         if not (fav_info and fav_info.invalid) then
-          load_all_recursive(item, fav_path)
+          load_all_recursive(item, fav_path, context)
         else
           item.loaded = true -- Помечаем как загруженный чтобы не было попыток загрузить
         end
@@ -202,6 +220,12 @@ function M.navigate(state, path, path_to_reveal, callback, async)
   
   if type(callback) == "function" then
     vim.schedule(callback)
+  end
+  
+  -- Финализация для file watchers
+  if state.use_libuv_file_watcher then
+    local fs_watch = require("neo-tree.sources.filesystem.lib.fs_watch")
+    fs_watch.updated_watched()
   end
 end
 

@@ -15,7 +15,7 @@ local M = {}
 
 ---Show filtered tree (из common.filters:57-94)
 local function show_filtered_tree(state, do_not_focus_window)
-  log.trace("Filtering tree with pattern:", state.search_pattern)
+  local use_fzy = state.use_fzy
   
   -- Копируем оригинальное дерево и фильтруем копию (НЕ пересоздаем!)
   state.tree = vim.deepcopy(state.orig_tree)
@@ -28,15 +28,23 @@ local function show_filtered_tree(state, do_not_focus_window)
     local node = state.tree:get_node(node_id)
     local path = node.extra.search_path or node.path
     
-    local should_keep = fzy.has_match(state.search_pattern, path)
-    if should_keep then
-      local score = fzy.score(state.search_pattern, path)
-      node.extra.fzy_score = score
-      log.info(string.format("[MATCH] %s (score: %.2f)", path, score))
-      if score > max_score then
-        max_score = score
-        max_id = node_id
+    local should_keep
+    if use_fzy then
+      -- Fuzzy search (как в "#" fuzzy_sorter)
+      should_keep = fzy.has_match(state.search_pattern, path)
+      if should_keep then
+        local score = fzy.score(state.search_pattern, path)
+        node.extra.fzy_score = score
+        if score > max_score then
+          max_score = score
+          max_id = node_id
+        end
       end
+    else
+      -- Substring search (как в "/" fuzzy_finder)
+      local lower_path = path:lower()
+      local lower_pattern = state.search_pattern:lower()
+      should_keep = lower_path:find(lower_pattern, 1, true) ~= nil
     end
     
     local has_matching_children = false
@@ -53,16 +61,10 @@ local function show_filtered_tree(state, do_not_focus_window)
     -- Если папка содержит совпадения, добавляем в список для раскрытия
     if node.type == "directory" and (should_keep or has_matching_children) then
       table.insert(folders_to_expand, node_id)
-      log.info(string.format("[EXPAND] %s (dir has matches)", path))
     end
     
     if not should_keep then
-      log.info(string.format("[REMOVE] %s (no match)", path))
       state.tree:remove_node(node_id)
-    else
-      if not fzy.has_match(state.search_pattern, path) then
-        log.info(string.format("[KEEP] %s (parent of match)", path))
-      end
     end
     return should_keep
   end
@@ -76,7 +78,6 @@ local function show_filtered_tree(state, do_not_focus_window)
   -- Раскрываем папки с совпадениями через default_expanded_nodes (как в fs_scan.lua:653)
   if #folders_to_expand > 0 then
     state.default_expanded_nodes = folders_to_expand
-    log.trace("Expanding", #folders_to_expand, "folders with matches")
   end
   
   -- Применяем раскрытие папок ДО redraw
@@ -92,12 +93,22 @@ local function show_filtered_tree(state, do_not_focus_window)
   end
 end
 
-M.show_filter = function(state, search_as_you_type, keep_filter_on_submit)
+M.show_filter = function(state, search_as_you_type, use_fzy, keep_filter_on_submit)
   local winid = vim.api.nvim_get_current_win()
   local height = vim.api.nvim_win_get_height(winid)
   local scroll_padding = 3
   
-  local popup_msg = search_as_you_type and "Filter:" or "Search:"
+  -- Устанавливаем режим поиска
+  state.use_fzy = use_fzy
+  
+  -- Меняем заголовок в зависимости от режима
+  local popup_msg
+  if search_as_you_type then
+    popup_msg = use_fzy and "Fuzzy Filter:" or "Filter:"
+  else
+    popup_msg = use_fzy and "Fuzzy Search:" or "Search:"
+  end
+  
   local width = vim.fn.winwidth(0) - 2
   local row = height - 3
   

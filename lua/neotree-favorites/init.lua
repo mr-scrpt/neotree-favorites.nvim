@@ -16,6 +16,49 @@ local wrap = function(func)
   return utils.wrap(func, M.name)
 end
 
+--- Stop all file watchers (like in filesystem source)
+---@param state table
+local function stop_watchers(state)
+  if state.use_libuv_file_watcher and state.tree then
+    local fs_watch = require("neo-tree.sources.filesystem.lib.fs_watch")
+    local log = require("neo-tree.log")
+    
+    -- Unwatch all previously watched folders
+    local loaded_folders = renderer.select_nodes(state.tree, function(node)
+      return node.type == "directory" and node.loaded
+    end)
+    
+    for _, folder in ipairs(loaded_folders) do
+      log.trace("Unwatching folder", folder.path)
+      fs_watch.unwatch_folder(folder:get_id())
+    end
+  end
+end
+
+--- Setup watcher for loaded directory (like on_directory_loaded in filesystem)
+---@param context table
+---@param dir_path string
+local function on_directory_loaded(context, dir_path)
+  local state = context.state
+  if state.use_libuv_file_watcher then
+    local fs_watch = require("neo-tree.sources.filesystem.lib.fs_watch")
+    local events = require("neo-tree.events")
+    local log = require("neo-tree.log")
+    
+    local fs_watch_callback = vim.schedule_wrap(function(err, fname)
+      if err then
+        log.error("file_event_callback: ", err)
+        return
+      end
+      -- Generate FS_EVENT like filesystem source does
+      events.fire_event(events.FS_EVENT, { afile = dir_path })
+    end)
+    
+    log.trace("Adding fs watcher for", dir_path)
+    fs_watch.watch_folder(dir_path, fs_watch_callback)
+  end
+end
+
 --- Load all directory contents recursively
 ---@param parent_item table
 ---@param parent_path string
@@ -36,23 +79,9 @@ local function load_all_recursive(parent_item, parent_path, context)
   
   parent_item.children = {}
   
-  -- Настраиваем file watcher для этой папки (как в filesystem source)
-  if context and context.state and context.state.use_libuv_file_watcher then
-    local fs_watch = require("neo-tree.sources.filesystem.lib.fs_watch")
-    local events = require("neo-tree.events")
-    local log = require("neo-tree.log")
-    
-    local fs_watch_callback = vim.schedule_wrap(function(err, fname)
-      if err then
-        log.error("file_event_callback: ", err)
-        return
-      end
-      -- Генерируем событие FS_EVENT (как в filesystem source)
-      events.fire_event(events.FS_EVENT, { afile = parent_path })
-    end)
-    
-    log.trace("Adding fs watcher for", parent_path)
-    fs_watch.watch_folder(parent_path, fs_watch_callback)
+  -- Setup file watcher for this directory (call on_directory_loaded like filesystem does)
+  if context then
+    on_directory_loaded(context, parent_path)
   end
   
   for _, entry in ipairs(entries) do
@@ -138,6 +167,9 @@ function M.navigate(state, path, path_to_reveal, callback, async)
   if state.loading then
     return
   end
+  
+  -- Stop all watchers before starting fresh (like filesystem source does)
+  stop_watchers(state)
   
   state.loading = true
   state.dirty = false

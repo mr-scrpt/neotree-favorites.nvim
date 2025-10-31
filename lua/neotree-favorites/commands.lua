@@ -1,7 +1,7 @@
 -- Команды для работы с flat favorites
 local manager = require("neotree-favorites.manager")
 local filesystem_commands = require("neo-tree.sources.filesystem.commands")
-local common_filter = require("neo-tree.sources.common.filters") -- ОБЩИЙ filter!
+local common_filter = require("neo-tree.sources.common.filters")
 
 -- НАСЛЕДУЕМ ВСЕ команды из filesystem
 local M = vim.tbl_extend("force", {}, filesystem_commands)
@@ -9,7 +9,6 @@ local M = vim.tbl_extend("force", {}, filesystem_commands)
 -- ПЕРЕОПРЕДЕЛЯЕМ fuzzy_finder - используем ОБЩИЙ filter вместо filesystem-specific
 M.fuzzy_finder = function(state)
   local config = state.config or {}
-  -- Используем ОБЩИЙ common.filters.show_filter!
   common_filter.show_filter(state, true, config.keep_filter_on_submit or false)
 end
 
@@ -21,6 +20,12 @@ end
 M.filter_on_submit = function(state)
   local config = state.config or {}
   common_filter.show_filter(state, false, config.keep_filter_on_submit or false)
+end
+
+M.fuzzy_finder_directory = function(state)
+  local config = state.config or {}
+  -- Поведение как обычного фильтра, без directory-only режима
+  common_filter.show_filter(state, true, config.keep_filter_on_submit or false)
 end
 
 M.clear_filter = function(state)

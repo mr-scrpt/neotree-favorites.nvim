@@ -4,6 +4,7 @@
 local renderer = require("neo-tree.ui.renderer")
 local file_items = require("neo-tree.sources.common.file-items")
 local utils = require("neo-tree.utils")
+local compat = require("neo-tree.utils._compat")
 
 -- Берем window defaults из filesystem для fuzzy_finder
 local filesystem_defaults = require("neo-tree.defaults").filesystem
@@ -281,6 +282,56 @@ function M.navigate(state, path, path_to_reveal, callback, async)
   if state.use_libuv_file_watcher then
     local fs_watch = require("neo-tree.sources.filesystem.lib.fs_watch")
     fs_watch.updated_watched()
+  end
+end
+
+--- Reset the current search/filter and optionally open the current node (file)
+---@param state table
+---@param refresh boolean|nil
+---@param open_current_node boolean|nil
+function M.reset_search(state, refresh, open_current_node)
+  -- Cancel any pending external filter
+  require("neo-tree.sources.filesystem.lib.filter_external").cancel()
+
+  -- Reset fuzzy state (mirrors filesystem behavior)
+  state.fuzzy_finder_mode = nil
+  state.use_fzy = nil
+  state.fzy_sort_result_scores = nil
+  state.sort_function_override = nil
+
+  if refresh == nil then
+    refresh = true
+  end
+
+  if state.open_folders_before_search then
+    state.force_open_folders = vim.deepcopy(state.open_folders_before_search, compat.noref())
+  else
+    state.force_open_folders = nil
+  end
+  state.search_pattern = nil
+  state.open_folders_before_search = nil
+
+  if open_current_node then
+    local success, node = pcall(state.tree.get_node, state.tree)
+    if success and node then
+      local path = node:get_id()
+      renderer.position.set(state, path)
+      if node.type == "directory" then
+        path = utils.remove_trailing_slash(path)
+        M.navigate(state, nil, path, function()
+          pcall(renderer.focus_node, state, path, false)
+        end)
+      else
+        utils.open_file(state, path)
+        if refresh and state.current_position ~= "current" and state.current_position ~= "float" then
+          M.navigate(state, nil, path)
+        end
+      end
+    end
+  else
+    if refresh then
+      M.navigate(state)
+    end
   end
 end
 

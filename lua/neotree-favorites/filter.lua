@@ -14,7 +14,7 @@ local common_filter = require("neo-tree.sources.common.filters")
 local M = {}
 
 -- DEBUG: Логирование в файл (временно отключено)
-local DEBUG_ENABLED = true
+local DEBUG_ENABLED = false
 local DEBUG_LOG = "/tmp/neotree-favorites-debug.log"
 local function log_to_file(msg)
   if not DEBUG_ENABLED then return end
@@ -71,7 +71,7 @@ local function show_filtered_tree(state, do_not_focus_window)
     use_fzy and "fuzzy" or "substring",
     nodes_before
   )
-  vim.notify(search_msg, vim.log.levels.INFO)
+  -- vim.notify(search_msg, vim.log.levels.INFO)
   log_to_file(search_msg)
   log_to_file("=== Checking files ===")
   
@@ -345,7 +345,7 @@ local function show_filtered_tree(state, do_not_focus_window)
       matched_count,
       #folders_to_expand
     )
-    vim.notify(result_msg, vim.log.levels.INFO)
+    -- vim.notify(result_msg, vim.log.levels.INFO)
     
     -- DEBUG: Проверяем folders_to_expand на дубликаты
     if #folders_to_expand > 0 then
@@ -420,7 +420,7 @@ local function show_filtered_tree(state, do_not_focus_window)
         table.insert(tree_msg_lines, string.format("... и еще %d узлов", #tree_structure - max_lines))
       end
       local tree_msg = "🌳 Tree structure:\n" .. table.concat(tree_msg_lines, "\n")
-      vim.notify(tree_msg, vim.log.levels.INFO)
+      -- vim.notify(tree_msg, vim.log.levels.INFO)
       
       -- Полное дерево в файл (без ограничения)
       log_to_file("🌳 FULL Tree structure:")
@@ -441,33 +441,14 @@ local function show_filtered_tree(state, do_not_focus_window)
   -- Обновляем отображение (как common.filters:90)
   manager.redraw(state.name)
   
-  -- КРИТИЧНО: Раскрываем путь до ВСЕХ найденных файлов
-  -- Собираем все файлы
-  local all_files = {}
-  local function collect_files(node_id)
-    local node = state.tree:get_node(node_id)
-    if not node then return end
-    
-    if node.type == "file" then
-      table.insert(all_files, node_id)
-    end
-    
-    if node:has_children() then
-      for _, child_id in ipairs(node:get_child_ids()) do
-        collect_files(child_id)
+  -- КРИТИЧНО: Раскрываем ВСЕ папки где есть совпадения
+  if #folders_to_expand > 0 then
+    log_to_file(string.format("📂 Expanding %d folders with matches", #folders_to_expand))
+    for _, folder_id in ipairs(folders_to_expand) do
+      local node = state.tree:get_node(folder_id)
+      if node and node.type == "directory" then
+        node:expand()
       end
-    end
-  end
-  
-  for _, root in ipairs(state.tree:get_nodes()) do
-    collect_files(root:get_id())
-  end
-  
-  log_to_file(string.format("📂 Expanding paths to %d files", #all_files))
-  for _, file_id in ipairs(all_files) do
-    local file_node = state.tree:get_node(file_id)
-    if file_node then
-      renderer.expand_to_node(state, file_node)
     end
   end
   

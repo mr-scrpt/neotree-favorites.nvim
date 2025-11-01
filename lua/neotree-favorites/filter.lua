@@ -454,6 +454,10 @@ end
 
 M.show_filter = function(state, search_as_you_type, use_fzy, keep_filter_on_submit)
   
+  -- КРИТИЧНО: Сбрасываем orig_tree при открытии НОВОГО поиска
+  -- Иначе при повторном поиске orig_tree будет содержать отфильтрованное дерево
+  state.orig_tree = nil
+  
   -- DEBUG: Логируем открытие поиска
   local mode_name = use_fzy and "fuzzy (#)" or "substring (/)"
   local open_msg = string.format("🔎 [FLAT_FAV] Opening search | Mode: %s | Live: %s",

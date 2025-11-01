@@ -13,6 +13,23 @@ local common_filter = require("neo-tree.sources.common.filters")
 
 local M = {}
 
+-- DEBUG: Логирование в файл
+local DEBUG_LOG = "/tmp/neotree-favorites-debug.log"
+local function log_to_file(msg)
+  local f = io.open(DEBUG_LOG, "a")
+  if f then
+    f:write(os.date("%H:%M:%S") .. " " .. msg .. "\n")
+    f:close()
+  end
+end
+
+-- Очищаем лог при загрузке модуля
+local f = io.open(DEBUG_LOG, "w")
+if f then
+  f:write("=== Neo-tree Favorites Debug Log ===\n")
+  f:close()
+end
+
 ---Show filtered tree (из common.filters:57-94)
 local function show_filtered_tree(state, do_not_focus_window)
   -- Проверяем что window все еще валидное
@@ -45,14 +62,14 @@ local function show_filtered_tree(state, do_not_focus_window)
     nodes_before = nodes_before + count_all_nodes(root:get_id(), state.orig_tree)
   end
   
-  vim.notify(
-    string.format("🔍 [FLAT_FAV] Searching: '%s' | Mode: %s | Nodes before: %d", 
-      state.search_pattern or "", 
-      use_fzy and "fuzzy" or "substring",
-      nodes_before
-    ),
-    vim.log.levels.INFO
+  local search_msg = string.format("🔍 [FLAT_FAV] Searching: '%s' | Mode: %s | Nodes before: %d",
+    state.search_pattern or "",
+    use_fzy and "fuzzy" or "substring",
+    nodes_before
   )
+  vim.notify(search_msg, vim.log.levels.INFO)
+  log_to_file(search_msg)
+  log_to_file("=== Checking files ===")
   
   -- Копируем оригинальное дерево и фильтруем копию (НЕ пересоздаем!)
   state.tree = vim.deepcopy(state.orig_tree)
@@ -129,9 +146,20 @@ local function show_filtered_tree(state, do_not_focus_window)
         local score = fzy.score(state.search_pattern, search_path)
         node.extra.fzy_score = score
         node.extra.fzy_search_path = search_path  -- Сохраняем для отладки
+        
+        -- DEBUG: Логируем каждый match с score
+        if node.type == "file" then
+          log_to_file(string.format("  ✓ MATCH: %s | score: %.2f | path: %s", node.name, score, search_path))
+        end
+        
         if score > max_score then
           max_score = score
           max_id = node_id
+        end
+      else
+        -- DEBUG: Логируем файлы которые НЕ подошли
+        if node.type == "file" then
+          log_to_file(string.format("  ✗ NO MATCH: %s | path: %s", node.name, search_path))
         end
       end
     else
@@ -223,6 +251,48 @@ local function show_filtered_tree(state, do_not_focus_window)
       )
     end
     
+    -- DEBUG: Проверяем есть ли все еще дубликаты в дереве
+    local all_paths = {}
+    local function collect_all_paths(node_id, parent_path)
+      local node = state.tree:get_node(node_id)
+      if not node then return end
+      
+      local current_path = parent_path .. "/" .. node.name
+      if all_paths[current_path] then
+        all_paths[current_path] = all_paths[current_path] + 1
+      else
+        all_paths[current_path] = 1
+      end
+      
+      if node:has_children() then
+        for _, child_id in ipairs(node:get_child_ids()) do
+          collect_all_paths(child_id, current_path)
+        end
+      end
+    end
+    
+    for _, root in ipairs(state.tree:get_nodes()) do
+      collect_all_paths(root:get_id(), "")
+    end
+    
+    local dupes_in_tree = {}
+    for path, count in pairs(all_paths) do
+      if count > 1 then
+        table.insert(dupes_in_tree, string.format("%s (x%d)", path, count))
+      end
+    end
+    
+    if #dupes_in_tree > 0 then
+      local dupe_msg = string.format("⚠️  [FLAT_FAV] Duplicates still in tree:\n%s", table.concat(dupes_in_tree, "\n"))
+      vim.notify(dupe_msg, vim.log.levels.ERROR)
+      log_to_file("DUPLICATES FOUND IN TREE:")
+      for _, d in ipairs(dupes_in_tree) do
+        log_to_file("  " .. d)
+      end
+    else
+      log_to_file("✅ No duplicates found in tree")
+    end
+    
     -- Подсчитываем оставшиеся узлы и строим структуру дерева
     local function build_tree_structure(node_id, level)
       local node = state.tree:get_node(node_id)
@@ -270,6 +340,56 @@ local function show_filtered_tree(state, do_not_focus_window)
     )
     vim.notify(result_msg, vim.log.levels.INFO)
     
+    -- DEBUG: Проверяем folders_to_expand на дубликаты
+    if #folders_to_expand > 0 then
+      local expand_paths = {}
+      local expand_dupes = {}
+      for _, folder_id in ipairs(folders_to_expand) do
+        if expand_paths[folder_id] then
+          table.insert(expand_dupes, folder_id)
+        else
+          expand_paths[folder_id] = true
+        end
+      end
+      
+      if #expand_dupes > 0 then
+        vim.notify(
+          string.format("⚠️  [FLAT_FAV] Duplicate IDs in folders_to_expand: %d", #expand_dupes),
+          vim.log.levels.WARN
+        )
+      end
+      
+      -- Показываем первые несколько папок для expand
+      local sample_expand = {}
+      for i = 1, math.min(#folders_to_expand, 5) do
+        local node = state.tree:get_node(folders_to_expand[i])
+        if node then
+          table.insert(sample_expand, string.format("%s (%s)", node.name, node.path or "no path"))
+        end
+      end
+      if #sample_expand > 0 then
+        vim.notify(
+          string.format("📂 Folders to expand:\n%s", table.concat(sample_expand, "\n")),
+          vim.log.levels.INFO
+        )
+      end
+      
+      -- Полный список в файл
+      log_to_file(string.format("📂 Folders to expand (total: %d):", #folders_to_expand))
+      for i, folder_id in ipairs(folders_to_expand) do
+        local node = state.tree:get_node(folder_id)
+        if node then
+          log_to_file(string.format("  %d. %s (path: %s, id: %s)", i, node.name, node.path or "nil", folder_id))
+        else
+          log_to_file(string.format("  %d. [NODE NOT FOUND] id: %s", i, folder_id))
+        end
+      end
+      
+      if #expand_dupes > 0 then
+        log_to_file(string.format("⚠️  WARNING: %d duplicate folder IDs in folders_to_expand!", #expand_dupes))
+      end
+    end
+    
     -- Показываем все найденные файлы (не папки)
     if #file_matches > 0 then
       local files_msg = string.format("📄 Found %d files:\n%s", #file_matches, table.concat(file_matches, "\n"))
@@ -294,6 +414,12 @@ local function show_filtered_tree(state, do_not_focus_window)
       end
       local tree_msg = "🌳 Tree structure:\n" .. table.concat(tree_msg_lines, "\n")
       vim.notify(tree_msg, vim.log.levels.INFO)
+      
+      -- Полное дерево в файл (без ограничения)
+      log_to_file("🌳 FULL Tree structure:")
+      for _, line in ipairs(tree_structure) do
+        log_to_file(line)
+      end
     end
     
     -- Если слишком много узлов, предупреждаем
@@ -305,30 +431,24 @@ local function show_filtered_tree(state, do_not_focus_window)
     end
   end
   
-  -- Раскрываем папки с совпадениями через default_expanded_nodes (как в fs_scan.lua:653)
+  -- КРИТИЧНО: Раскрываем папки ДО redraw через force_open_folders (не default_expanded_nodes!)
   if #folders_to_expand > 0 then
-    state.default_expanded_nodes = folders_to_expand
-  end
-  
-  -- Применяем раскрытие папок ДО redraw
-  if #folders_to_expand > 0 and state.tree then
-    renderer.set_expanded_nodes(state.tree, folders_to_expand)
-  end
-  
-  -- Проверяем что window все еще валидное перед redraw
-  if not state.winid or not vim.api.nvim_win_is_valid(state.winid) then
-    log.warn("[FLAT_FAV FILTER] Window became invalid before redraw, aborting")
-    return
-  end
-  
-  -- Используем renderer.redraw вместо manager.redraw для сохранения expanded
-  renderer.redraw(state)
-  
-  if max_id then
-    -- Проверяем что window все еще валидное перед focus
-    if state.winid and vim.api.nvim_win_is_valid(state.winid) then
-      renderer.focus_node(state, max_id, do_not_focus_window)
+    log_to_file(string.format("📂 Setting %d folders to force_open_folders", #folders_to_expand))
+    
+    -- Используем force_open_folders вместо default_expanded_nodes
+    -- Это не вызывает дублирование но заставляет папки быть раскрытыми
+    state.force_open_folders = {}
+    for _, folder_id in ipairs(folders_to_expand) do
+      state.force_open_folders[folder_id] = true
     end
+  end
+  
+  -- Обновляем отображение (как common.filters:90)
+  manager.redraw(state.name)
+  
+  -- Фокусируемся на узле с лучшим score (как common.filters:91-93)
+  if max_id then
+    renderer.focus_node(state, max_id, do_not_focus_window)
   end
 end
 
@@ -336,13 +456,12 @@ M.show_filter = function(state, search_as_you_type, use_fzy, keep_filter_on_subm
   
   -- DEBUG: Логируем открытие поиска
   local mode_name = use_fzy and "fuzzy (#)" or "substring (/)"
-  vim.notify(
-    string.format("🔎 [FLAT_FAV] Opening search | Mode: %s | Live: %s", 
-      mode_name,
-      search_as_you_type and "yes" or "no"
-    ),
-    vim.log.levels.INFO
+  local open_msg = string.format("🔎 [FLAT_FAV] Opening search | Mode: %s | Live: %s",
+    mode_name,
+    search_as_you_type and "yes" or "no"
   )
+  vim.notify(open_msg, vim.log.levels.INFO)
+  log_to_file(open_msg)
   
   local winid = vim.api.nvim_get_current_win()
   local height = vim.api.nvim_win_get_height(winid)

@@ -13,9 +13,11 @@ local common_filter = require("neo-tree.sources.common.filters")
 
 local M = {}
 
--- DEBUG: Логирование в файл
+-- DEBUG: Логирование в файл (временно отключено)
+local DEBUG_ENABLED = true
 local DEBUG_LOG = "/tmp/neotree-favorites-debug.log"
 local function log_to_file(msg)
+  if not DEBUG_ENABLED then return end
   local f = io.open(DEBUG_LOG, "a")
   if f then
     f:write(os.date("%H:%M:%S") .. " " .. msg .. "\n")
@@ -24,10 +26,12 @@ local function log_to_file(msg)
 end
 
 -- Очищаем лог при загрузке модуля
-local f = io.open(DEBUG_LOG, "w")
-if f then
-  f:write("=== Neo-tree Favorites Debug Log ===\n")
-  f:close()
+if DEBUG_ENABLED then
+  local f = io.open(DEBUG_LOG, "w")
+  if f then
+    f:write("=== Neo-tree Favorites Debug Log ===\n")
+    f:close()
+  end
 end
 
 ---Show filtered tree (из common.filters:57-94)
@@ -251,6 +255,9 @@ local function show_filtered_tree(state, do_not_focus_window)
       )
     end
     
+    -- НЕ удаляем папки - пусть focus_node раскроет путь до файла
+    log_to_file("Skipping folder removal - relying on focus_node to expand path")
+    
     -- DEBUG: Проверяем есть ли все еще дубликаты в дереве
     local all_paths = {}
     local function collect_all_paths(node_id, parent_path)
@@ -368,10 +375,10 @@ local function show_filtered_tree(state, do_not_focus_window)
         end
       end
       if #sample_expand > 0 then
-        vim.notify(
-          string.format("📂 Folders to expand:\n%s", table.concat(sample_expand, "\n")),
-          vim.log.levels.INFO
-        )
+        -- vim.notify(
+        --   string.format("📂 Folders to expand:\n%s", table.concat(sample_expand, "\n")),
+        --   vim.log.levels.INFO
+        -- )
       end
       
       -- Полный список в файл
@@ -393,13 +400,13 @@ local function show_filtered_tree(state, do_not_focus_window)
     -- Показываем все найденные файлы (не папки)
     if #file_matches > 0 then
       local files_msg = string.format("📄 Found %d files:\n%s", #file_matches, table.concat(file_matches, "\n"))
-      vim.notify(files_msg, vim.log.levels.INFO)
+      -- vim.notify(files_msg, vim.log.levels.INFO)
     end
     
     -- Для fuzzy поиска показываем примеры обработки путей
     if use_fzy and #fuzzy_examples > 0 then
       local fuzzy_msg = "🔍 Fuzzy search examples:\n" .. table.concat(fuzzy_examples, "\n---\n")
-      vim.notify(fuzzy_msg, vim.log.levels.INFO)
+      -- vim.notify(fuzzy_msg, vim.log.levels.INFO)
     end
     
     -- Показываем структуру дерева (ограничиваем до 50 строк)
@@ -431,24 +438,45 @@ local function show_filtered_tree(state, do_not_focus_window)
     end
   end
   
-  -- КРИТИЧНО: Раскрываем папки ДО redraw через force_open_folders (не default_expanded_nodes!)
-  if #folders_to_expand > 0 then
-    log_to_file(string.format("📂 Setting %d folders to force_open_folders", #folders_to_expand))
-    
-    -- Используем force_open_folders вместо default_expanded_nodes
-    -- Это не вызывает дублирование но заставляет папки быть раскрытыми
-    state.force_open_folders = {}
-    for _, folder_id in ipairs(folders_to_expand) do
-      state.force_open_folders[folder_id] = true
-    end
-  end
-  
   -- Обновляем отображение (как common.filters:90)
   manager.redraw(state.name)
   
-  -- Фокусируемся на узле с лучшим score (как common.filters:91-93)
+  -- КРИТИЧНО: Раскрываем путь до ВСЕХ найденных файлов
+  -- Собираем все файлы
+  local all_files = {}
+  local function collect_files(node_id)
+    local node = state.tree:get_node(node_id)
+    if not node then return end
+    
+    if node.type == "file" then
+      table.insert(all_files, node_id)
+    end
+    
+    if node:has_children() then
+      for _, child_id in ipairs(node:get_child_ids()) do
+        collect_files(child_id)
+      end
+    end
+  end
+  
+  for _, root in ipairs(state.tree:get_nodes()) do
+    collect_files(root:get_id())
+  end
+  
+  log_to_file(string.format("📂 Expanding paths to %d files", #all_files))
+  for _, file_id in ipairs(all_files) do
+    local file_node = state.tree:get_node(file_id)
+    if file_node then
+      renderer.expand_to_node(state, file_node)
+    end
+  end
+  
+  -- Фокусируемся на узле с лучшим score
   if max_id then
+    log_to_file(string.format("🎯 Focusing on best match: %s", max_id))
     renderer.focus_node(state, max_id, do_not_focus_window)
+  else
+    log_to_file("⚠️  No best match found - nothing to focus")
   end
 end
 
@@ -464,7 +492,7 @@ M.show_filter = function(state, search_as_you_type, use_fzy, keep_filter_on_subm
     mode_name,
     search_as_you_type and "yes" or "no"
   )
-  vim.notify(open_msg, vim.log.levels.INFO)
+  -- vim.notify(open_msg, vim.log.levels.INFO)
   log_to_file(open_msg)
   
   local winid = vim.api.nvim_get_current_win()
@@ -526,25 +554,25 @@ M.show_filter = function(state, search_as_you_type, use_fzy, keep_filter_on_subm
     default_value = state.search_pattern,
     on_submit = function(value)
       if value == "" then
-        vim.notify("↩️  [FLAT_FAV] Submit with empty value - resetting search", vim.log.levels.INFO)
+        -- vim.notify("↩️  [FLAT_FAV] Submit with empty value - resetting search", vim.log.levels.INFO)
         -- Сброс фильтра
         local flat_favorites = require("neotree-favorites")
         flat_favorites.reset_search(state)
       else
         if search_as_you_type and not keep_filter_on_submit then
-          vim.notify(
-            string.format("↩️  [FLAT_FAV] Enter pressed - opening file and resetting search (pattern: '%s')", value),
-            vim.log.levels.INFO
-          )
+          -- vim.notify(
+          --   string.format("↩️  [FLAT_FAV] Enter pressed - opening file and resetting search (pattern: '%s')", value),
+          --   vim.log.levels.INFO
+          -- )
           -- Enter с search_as_you_type - вызываем НАШ reset_search
           local flat_favorites = require("neotree-favorites")
           flat_favorites.reset_search(state, true, true)
           return
         end
-        vim.notify(
-          string.format("↩️  [FLAT_FAV] Submit search: '%s'", value),
-          vim.log.levels.INFO
-        )
+        -- vim.notify(
+        --   string.format("↩️  [FLAT_FAV] Submit search: '%s'", value),
+        --   vim.log.levels.INFO
+        -- )
         state.search_pattern = value
         show_filtered_tree(state, false)
       end
@@ -571,7 +599,7 @@ M.show_filter = function(state, search_as_you_type, use_fzy, keep_filter_on_subm
           return
         end
         
-        vim.notify("🗑️  [FLAT_FAV] Search cleared - resetting to original tree", vim.log.levels.INFO)
+        -- vim.notify("🗑️  [FLAT_FAV] Search cleared - resetting to original tree", vim.log.levels.INFO)
         
         -- Сохраняем open_folders_before_search как в filesystem (filter.lua:159-164)
         local original_open_folders = nil
@@ -591,10 +619,10 @@ M.show_filter = function(state, search_as_you_type, use_fzy, keep_filter_on_subm
         end)
       else
         -- DEBUG: Логируем что печатает пользователь
-        vim.notify(
-          string.format("⌨️  [FLAT_FAV] Typing: '%s' (length: %d)", value, #value),
-          vim.log.levels.INFO
-        )
+        -- vim.notify(
+        --   string.format("⌨️  [FLAT_FAV] Typing: '%s' (length: %d)", value, #value),
+        --   vim.log.levels.INFO
+        -- )
         
         state.search_pattern = value
         
@@ -603,7 +631,7 @@ M.show_filter = function(state, search_as_you_type, use_fzy, keep_filter_on_subm
         utils.debounce(state.name .. "_filter", function()
           -- Проверяем что pattern все еще установлен (не был очищен)
           if not state.search_pattern or state.search_pattern == "" then
-            vim.notify("🗑️  [FLAT_FAV] Pattern was cleared, skipping filter", vim.log.levels.INFO)
+            -- vim.notify("🗑️  [FLAT_FAV] Pattern was cleared, skipping filter", vim.log.levels.INFO)
             return
           end
           show_filtered_tree(state, true)
@@ -630,14 +658,14 @@ M.show_filter = function(state, search_as_you_type, use_fzy, keep_filter_on_subm
       vim.cmd("redraw!")
     end,
     close = function(_state)
-      vim.notify("❌ [FLAT_FAV] Search popup closed (Esc)", vim.log.levels.INFO)
+      -- vim.notify("❌ [FLAT_FAV] Search popup closed (Esc)", vim.log.levels.INFO)
       vim.cmd("stopinsert")
       input:unmount()
       if utils.truthy(_state.search_pattern) then
-        vim.notify(
-          string.format("🔄 [FLAT_FAV] Resetting search after close (pattern was: '%s')", _state.search_pattern),
-          vim.log.levels.INFO
-        )
+        -- vim.notify(
+        --   string.format("🔄 [FLAT_FAV] Resetting search after close (pattern was: '%s')", _state.search_pattern),
+        --   vim.log.levels.INFO
+        -- )
         local flat_favorites = require("neotree-favorites")
         flat_favorites.reset_search(_state, true)
       end

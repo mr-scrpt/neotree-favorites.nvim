@@ -58,20 +58,77 @@ local function show_filtered_tree(state, do_not_focus_window)
   state.tree = vim.deepcopy(state.orig_tree)
   state.tree:get_nodes()[1].search_pattern = state.search_pattern
   
+  -- КРИТИЧНО: Обновляем winid и bufnr в дереве чтобы избежать "Invalid window" при повторных поисках
+  if state.tree then
+    if state.winid and vim.api.nvim_win_is_valid(state.winid) then
+      state.tree.winid = state.winid
+    end
+    if state.bufnr and vim.api.nvim_buf_is_valid(state.bufnr) then
+      state.tree.bufnr = state.bufnr
+    end
+  end
+  
   local max_score, max_id = fzy.get_score_min(), nil
   local folders_to_expand = {}  -- Папки с совпадениями которые нужно раскрыть
   
+  -- Получаем "базовый" путь (корень избранного) для относительных путей
+  local base_path = state.path  -- Обычно это cwd проекта
+  
   local function filter_tree(node_id)
     local node = state.tree:get_node(node_id)
-    local path = node.extra.search_path or node.path
+    local full_path = node.extra.search_path or node.path
     
     local should_keep
     if use_fzy then
-      -- Fuzzy search (как в "#" fuzzy_sorter) - ищем по полному пути
-      should_keep = fzy.has_match(state.search_pattern, path)
+      -- Fuzzy search (как в "#" fuzzy_sorter) - ищем по ОТНОСИТЕЛЬНОМУ пути
+      -- Убираем общий префикс чтобы не находить случайные совпадения в /home/username/
+      local search_path = full_path
+      
+      -- Находим избранные папки из корня дерева
+      local favorite_folders = {}
+      if state.orig_tree then
+        local root_nodes = state.orig_tree:get_nodes()
+        if root_nodes and #root_nodes > 0 then
+          -- Первый узел - это корень "📦 Flat Favorites"
+          local flat_root = root_nodes[1]
+          if flat_root and flat_root:has_children() then
+            -- Дети root'а - это избранные папки (composition, react, etc)
+            for _, child_id in ipairs(flat_root:get_child_ids()) do
+              local child = state.orig_tree:get_node(child_id)
+              if child and child.type == "directory" then
+                table.insert(favorite_folders, child.name .. "/")
+              end
+            end
+          end
+        end
+      end
+      
+      -- Пытаемся обрезать от избранной папки
+      -- ВАЖНО: Ищем ПОСЛЕДНЕЕ вхождение (справа налево) чтобы избежать дублирования
+      local best_pos = nil
+      local best_pattern = nil
+      for _, pattern in ipairs(favorite_folders) do
+        -- Ищем все вхождения pattern и берем последнее
+        local pos = 1
+        while true do
+          local found_pos = search_path:find(pattern, pos, true)
+          if not found_pos then break end
+          best_pos = found_pos
+          best_pattern = pattern
+          pos = found_pos + 1
+        end
+      end
+      
+      -- Если нашли избранную папку, обрезаем от неё
+      if best_pos then
+        search_path = search_path:sub(best_pos)
+      end
+      
+      should_keep = fzy.has_match(state.search_pattern, search_path)
       if should_keep then
-        local score = fzy.score(state.search_pattern, path)
+        local score = fzy.score(state.search_pattern, search_path)
         node.extra.fzy_score = score
+        node.extra.fzy_search_path = search_path  -- Сохраняем для отладки
         if score > max_score then
           max_score = score
           max_id = node_id
@@ -114,10 +171,56 @@ local function show_filtered_tree(state, do_not_focus_window)
   local matched_count = 0
   local file_matches = {}
   local tree_structure = {}
+  local fuzzy_examples = {}  -- Примеры для fuzzy поиска
   
   if state.search_pattern and #state.search_pattern > 0 then
     for _, root in ipairs(state.tree:get_nodes()) do
       filter_tree(root:get_id())
+    end
+    
+    -- КРИТИЧНО: Дедуплицируем узлы после фильтрации
+    -- NuiTree.remove_node иногда оставляет дубликаты папок
+    local duplicates_removed = 0
+    local function dedupe_tree_nodes(parent_id)
+      local parent = state.tree:get_node(parent_id)
+      if not parent or not parent:has_children() then
+        return
+      end
+      
+      local seen_paths = {}  -- Дедуплицируем по ПУТИ, не по ID!
+      local children_to_remove = {}
+      
+      for _, child_id in ipairs(parent:get_child_ids()) do
+        local child = state.tree:get_node(child_id)
+        if child then
+          local path_key = child.path or child.id
+          if seen_paths[path_key] then
+            -- Это дубликат по пути!
+            table.insert(children_to_remove, child_id)
+            duplicates_removed = duplicates_removed + 1
+          else
+            seen_paths[path_key] = true
+            -- Рекурсивно дедуплицируем детей
+            dedupe_tree_nodes(child_id)
+          end
+        end
+      end
+      
+      -- Удаляем дубликаты
+      for _, dup_id in ipairs(children_to_remove) do
+        state.tree:remove_node(dup_id)
+      end
+    end
+    
+    for _, root in ipairs(state.tree:get_nodes()) do
+      dedupe_tree_nodes(root:get_id())
+    end
+    
+    if duplicates_removed > 0 then
+      vim.notify(
+        string.format("🔧 [FLAT_FAV] Removed %d duplicate nodes", duplicates_removed),
+        vim.log.levels.WARN
+      )
     end
     
     -- Подсчитываем оставшиеся узлы и строим структуру дерева
@@ -135,6 +238,16 @@ local function show_filtered_tree(state, do_not_focus_window)
       -- Собираем файлы для отдельного списка
       if node.type == "file" then
         table.insert(file_matches, node.path)
+        
+        -- Для fuzzy поиска собираем примеры путей
+        if use_fzy and #fuzzy_examples < 5 and node.extra and node.extra.fzy_search_path then
+          table.insert(fuzzy_examples, string.format(
+            "Original: %s\nSearched: %s\nScore: %.2f",
+            node.path,
+            node.extra.fzy_search_path,
+            node.extra.fzy_score or 0
+          ))
+        end
       end
       
       if node:has_children() then
@@ -161,6 +274,12 @@ local function show_filtered_tree(state, do_not_focus_window)
     if #file_matches > 0 then
       local files_msg = string.format("📄 Found %d files:\n%s", #file_matches, table.concat(file_matches, "\n"))
       vim.notify(files_msg, vim.log.levels.INFO)
+    end
+    
+    -- Для fuzzy поиска показываем примеры обработки путей
+    if use_fzy and #fuzzy_examples > 0 then
+      local fuzzy_msg = "🔍 Fuzzy search examples:\n" .. table.concat(fuzzy_examples, "\n---\n")
+      vim.notify(fuzzy_msg, vim.log.levels.INFO)
     end
     
     -- Показываем структуру дерева (ограничиваем до 50 строк)
@@ -261,6 +380,15 @@ M.show_filter = function(state, search_as_you_type, use_fzy, keep_filter_on_subm
   -- КРИТИЧНО: Сохраняем оригинальное дерево ТОЛЬКО ОДИН РАЗ (как common.filters:124)
   if not state.orig_tree then
     state.orig_tree = vim.deepcopy(state.tree)
+    -- Обновляем winid/bufnr в оригинальном дереве
+    if state.orig_tree then
+      if state.winid and vim.api.nvim_win_is_valid(state.winid) then
+        state.orig_tree.winid = state.winid
+      end
+      if state.bufnr and vim.api.nvim_buf_is_valid(state.bufnr) then
+        state.orig_tree.bufnr = state.bufnr
+      end
+    end
   end
   
   -- Сохраняем открытые папки перед поиском

@@ -442,6 +442,9 @@ function M.reset_search(state, refresh, open_current_node)
   state.use_fzy = nil
   state.fzy_sort_result_scores = nil
   state.sort_function_override = nil
+  
+  -- КРИТИЧНО: Сбрасываем orig_tree чтобы при следующем поиске создалось новое с актуальным winid/bufnr
+  state.orig_tree = nil
 
   if refresh == nil then
     refresh = true

@@ -15,11 +15,44 @@ local M = {}
 
 ---Show filtered tree (из common.filters:57-94)
 local function show_filtered_tree(state, do_not_focus_window)
+  -- Проверяем что window все еще валидное
+  if not state.winid or not vim.api.nvim_win_is_valid(state.winid) then
+    vim.notify("[FLAT_FAV] ⚠️  Window is not valid, aborting filter", vim.log.levels.WARN)
+    return
+  end
+  
   -- По умолчанию используем substring search если use_fzy не установлен
   local use_fzy = state.use_fzy
   if use_fzy == nil then
     use_fzy = false
   end
+  
+  -- DEBUG: Подсчитываем узлы ДО фильтрации
+  local function count_all_nodes(node_id, tree)
+    local node = tree:get_node(node_id)
+    if not node then return 0 end
+    local count = 1
+    if node:has_children() then
+      for _, child_id in ipairs(node:get_child_ids()) do
+        count = count + count_all_nodes(child_id, tree)
+      end
+    end
+    return count
+  end
+  
+  local nodes_before = 0
+  for _, root in ipairs(state.orig_tree:get_nodes()) do
+    nodes_before = nodes_before + count_all_nodes(root:get_id(), state.orig_tree)
+  end
+  
+  vim.notify(
+    string.format("🔍 [FLAT_FAV] Searching: '%s' | Mode: %s | Nodes before: %d", 
+      state.search_pattern or "", 
+      use_fzy and "fuzzy" or "substring",
+      nodes_before
+    ),
+    vim.log.levels.INFO
+  )
   
   -- Копируем оригинальное дерево и фильтруем копию (НЕ пересоздаем!)
   state.tree = vim.deepcopy(state.orig_tree)
@@ -34,7 +67,7 @@ local function show_filtered_tree(state, do_not_focus_window)
     
     local should_keep
     if use_fzy then
-      -- Fuzzy search (как в "#" fuzzy_sorter)
+      -- Fuzzy search (как в "#" fuzzy_sorter) - ищем по полному пути
       should_keep = fzy.has_match(state.search_pattern, path)
       if should_keep then
         local score = fzy.score(state.search_pattern, path)
@@ -45,10 +78,11 @@ local function show_filtered_tree(state, do_not_focus_window)
         end
       end
     else
-      -- Substring search (как в "/" fuzzy_finder)
-      local lower_path = path:lower()
+      -- Substring search (как в "/" fuzzy_finder) - ищем ТОЛЬКО по имени файла
+      local filename = node.name  -- Используем имя файла вместо полного пути!
+      local lower_filename = filename:lower()
       local lower_pattern = state.search_pattern:lower()
-      should_keep = lower_path:find(lower_pattern, 1, true) ~= nil
+      should_keep = lower_filename:find(lower_pattern, 1, true) ~= nil
       -- Запоминаем первый найденный файл для фокуса
       if should_keep and not max_id and node.type == "file" then
         max_id = node_id
@@ -77,9 +111,78 @@ local function show_filtered_tree(state, do_not_focus_window)
     return should_keep
   end
   
+  local matched_count = 0
+  local file_matches = {}
+  local tree_structure = {}
+  
   if state.search_pattern and #state.search_pattern > 0 then
     for _, root in ipairs(state.tree:get_nodes()) do
       filter_tree(root:get_id())
+    end
+    
+    -- Подсчитываем оставшиеся узлы и строим структуру дерева
+    local function build_tree_structure(node_id, level)
+      local node = state.tree:get_node(node_id)
+      if not node then return 0 end
+      
+      local indent = string.rep("  ", level)
+      local icon = node.type == "directory" and "📁" or "📄"
+      local line = string.format("%s%s %s", indent, icon, node.name)
+      table.insert(tree_structure, line)
+      
+      local count = 1
+      
+      -- Собираем файлы для отдельного списка
+      if node.type == "file" then
+        table.insert(file_matches, node.path)
+      end
+      
+      if node:has_children() then
+        for _, child_id in ipairs(node:get_child_ids()) do
+          count = count + build_tree_structure(child_id, level + 1)
+        end
+      end
+      return count
+    end
+    
+    for _, root in ipairs(state.tree:get_nodes()) do
+      matched_count = matched_count + build_tree_structure(root:get_id(), 0)
+    end
+    
+    -- DEBUG: Детальное логирование результатов
+    local result_msg = string.format(
+      "✅ [FLAT_FAV] Results: %d nodes matched | %d folders to expand",
+      matched_count,
+      #folders_to_expand
+    )
+    vim.notify(result_msg, vim.log.levels.INFO)
+    
+    -- Показываем все найденные файлы (не папки)
+    if #file_matches > 0 then
+      local files_msg = string.format("📄 Found %d files:\n%s", #file_matches, table.concat(file_matches, "\n"))
+      vim.notify(files_msg, vim.log.levels.INFO)
+    end
+    
+    -- Показываем структуру дерева (ограничиваем до 50 строк)
+    if #tree_structure > 0 then
+      local max_lines = 50
+      local tree_msg_lines = {}
+      for i = 1, math.min(#tree_structure, max_lines) do
+        table.insert(tree_msg_lines, tree_structure[i])
+      end
+      if #tree_structure > max_lines then
+        table.insert(tree_msg_lines, string.format("... и еще %d узлов", #tree_structure - max_lines))
+      end
+      local tree_msg = "🌳 Tree structure:\n" .. table.concat(tree_msg_lines, "\n")
+      vim.notify(tree_msg, vim.log.levels.INFO)
+    end
+    
+    -- Если слишком много узлов, предупреждаем
+    if matched_count > 1000 then
+      vim.notify(
+        string.format("⚠️  [FLAT_FAV] Too many matches (%d nodes)! Consider more specific search.", matched_count),
+        vim.log.levels.WARN
+      )
     end
   end
   
@@ -93,15 +196,34 @@ local function show_filtered_tree(state, do_not_focus_window)
     renderer.set_expanded_nodes(state.tree, folders_to_expand)
   end
   
+  -- Проверяем что window все еще валидное перед redraw
+  if not state.winid or not vim.api.nvim_win_is_valid(state.winid) then
+    log.warn("[FLAT_FAV FILTER] Window became invalid before redraw, aborting")
+    return
+  end
+  
   -- Используем renderer.redraw вместо manager.redraw для сохранения expanded
   renderer.redraw(state)
   
   if max_id then
-    renderer.focus_node(state, max_id, do_not_focus_window)
+    -- Проверяем что window все еще валидное перед focus
+    if state.winid and vim.api.nvim_win_is_valid(state.winid) then
+      renderer.focus_node(state, max_id, do_not_focus_window)
+    end
   end
 end
 
 M.show_filter = function(state, search_as_you_type, use_fzy, keep_filter_on_submit)
+  
+  -- DEBUG: Логируем открытие поиска
+  local mode_name = use_fzy and "fuzzy (#)" or "substring (/)"
+  vim.notify(
+    string.format("🔎 [FLAT_FAV] Opening search | Mode: %s | Live: %s", 
+      mode_name,
+      search_as_you_type and "yes" or "no"
+    ),
+    vim.log.levels.INFO
+  )
   
   local winid = vim.api.nvim_get_current_win()
   local height = vim.api.nvim_win_get_height(winid)
@@ -153,16 +275,25 @@ M.show_filter = function(state, search_as_you_type, use_fzy, keep_filter_on_subm
     default_value = state.search_pattern,
     on_submit = function(value)
       if value == "" then
+        vim.notify("↩️  [FLAT_FAV] Submit with empty value - resetting search", vim.log.levels.INFO)
         -- Сброс фильтра
         local flat_favorites = require("neotree-favorites")
         flat_favorites.reset_search(state)
       else
         if search_as_you_type and not keep_filter_on_submit then
+          vim.notify(
+            string.format("↩️  [FLAT_FAV] Enter pressed - opening file and resetting search (pattern: '%s')", value),
+            vim.log.levels.INFO
+          )
           -- Enter с search_as_you_type - вызываем НАШ reset_search
           local flat_favorites = require("neotree-favorites")
           flat_favorites.reset_search(state, true, true)
           return
         end
+        vim.notify(
+          string.format("↩️  [FLAT_FAV] Submit search: '%s'", value),
+          vim.log.levels.INFO
+        )
         state.search_pattern = value
         show_filtered_tree(state, false)
       end
@@ -188,7 +319,8 @@ M.show_filter = function(state, search_as_you_type, use_fzy, keep_filter_on_subm
         if state.search_pattern == nil then
           return
         end
-        log.trace("Resetting search in on_change")
+        
+        vim.notify("🗑️  [FLAT_FAV] Search cleared - resetting to original tree", vim.log.levels.INFO)
         
         -- Сохраняем open_folders_before_search как в filesystem (filter.lua:159-164)
         local original_open_folders = nil
@@ -207,7 +339,12 @@ M.show_filter = function(state, search_as_you_type, use_fzy, keep_filter_on_subm
           state.use_fzy = state._filter_use_fzy  -- Восстанавливаем режим поиска
         end)
       else
-        log.trace("Setting search to:", value)
+        -- DEBUG: Логируем что печатает пользователь
+        vim.notify(
+          string.format("⌨️  [FLAT_FAV] Typing: '%s' (length: %d)", value, #value),
+          vim.log.levels.INFO
+        )
+        
         state.search_pattern = value
         
         -- Debounce фильтрацию
@@ -215,6 +352,7 @@ M.show_filter = function(state, search_as_you_type, use_fzy, keep_filter_on_subm
         utils.debounce(state.name .. "_filter", function()
           -- Проверяем что pattern все еще установлен (не был очищен)
           if not state.search_pattern or state.search_pattern == "" then
+            vim.notify("🗑️  [FLAT_FAV] Pattern was cleared, skipping filter", vim.log.levels.INFO)
             return
           end
           show_filtered_tree(state, true)
@@ -241,9 +379,14 @@ M.show_filter = function(state, search_as_you_type, use_fzy, keep_filter_on_subm
       vim.cmd("redraw!")
     end,
     close = function(_state)
+      vim.notify("❌ [FLAT_FAV] Search popup closed (Esc)", vim.log.levels.INFO)
       vim.cmd("stopinsert")
       input:unmount()
       if utils.truthy(_state.search_pattern) then
+        vim.notify(
+          string.format("🔄 [FLAT_FAV] Resetting search after close (pattern was: '%s')", _state.search_pattern),
+          vim.log.levels.INFO
+        )
         local flat_favorites = require("neotree-favorites")
         flat_favorites.reset_search(_state, true)
       end

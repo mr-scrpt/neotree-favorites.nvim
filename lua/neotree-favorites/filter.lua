@@ -441,16 +441,8 @@ local function show_filtered_tree(state, do_not_focus_window)
   -- Обновляем отображение (как common.filters:90)
   manager.redraw(state.name)
   
-  -- КРИТИЧНО: Раскрываем ВСЕ папки где есть совпадения
-  if #folders_to_expand > 0 then
-    log_to_file(string.format("📂 Expanding %d folders with matches", #folders_to_expand))
-    for _, folder_id in ipairs(folders_to_expand) do
-      local node = state.tree:get_node(folder_id)
-      if node and node.type == "directory" then
-        node:expand()
-      end
-    end
-  end
+  -- НЕ вызываем expand() - это создает дубли!
+  -- Папки будут раскрываться через focus_node
   
   -- Фокусируемся на узле с лучшим score
   if max_id then
